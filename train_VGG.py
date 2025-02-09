@@ -121,7 +121,7 @@ def main():
     # --------------------------------------
     # Model Setup
     # --------------------------------------
-    model = models.vgg16(weights=None)
+    model = models.vgg16_bn(weights=None)
     in_features = model.classifier[6].in_features
     model.classifier[6] = nn.Linear(in_features, num_classes)
 
