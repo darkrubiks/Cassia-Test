@@ -249,6 +249,7 @@ def main():
                 save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch_{epoch+1}.pth')
                 return  # Stop training early
 
+        """
         # Save checkpoint after each epoch, including early stopping info.
         checkpoint = {
             'epoch': epoch + 1,
@@ -260,6 +261,7 @@ def main():
             'epochs_no_improve': epochs_no_improve
         }
         save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch_{epoch+1}.pth')
+        """
 
     print("Training complete.")
 
