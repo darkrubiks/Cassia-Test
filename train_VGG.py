@@ -10,6 +10,7 @@ import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
 from torchvision import models
 from torch.cuda.amp import autocast, GradScaler
+from tqdm import tqdm
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train VGG on CASIA-WebFace with resume and early stopping")
@@ -50,12 +51,23 @@ def main():
     # --------------------------------------
     # Hyperparameters & Settings
     # --------------------------------------
+    #AdamW
     num_epochs = 1000
     batch_size = 128
     base_lr = 0.01            # for AdamW
     weight_decay = 5e-4
     warmup_epochs = 5
     T_max = num_epochs - warmup_epochs  # for cosine annealing after warmup
+
+    """#SGD
+    num_epochs = 20
+    batch_size = 64
+    learning_rate = 0.01
+    momentum = 0.9
+    weight_decay = 5e-4
+    step_size = 7
+    gamma = 0.1
+    """
 
     # Early stopping parameters
     early_stopping_patience = 5  # Number of epochs to wait without improvement
@@ -109,7 +121,7 @@ def main():
     # --------------------------------------
     # Model Setup
     # --------------------------------------
-    model = models.vgg16(pretrained=False)
+    model = models.vgg16(weights=None)
     in_features = model.classifier[6].in_features
     model.classifier[6] = nn.Linear(in_features, num_classes)
 
@@ -121,6 +133,7 @@ def main():
     # --------------------------------------
     # Optimizer, Loss, Scheduler, and Mixed Precision
     # --------------------------------------
+    #AdamW
     optimizer = optim.AdamW(model.parameters(), lr=base_lr, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss()
     
@@ -130,6 +143,15 @@ def main():
         else:
             return 0.5 * (1 + math.cos(math.pi * (epoch - warmup_epochs) / T_max))
     scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
+
+    """SGD
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(model.parameters(), lr=learning_rate,
+                          momentum=momentum, weight_decay=weight_decay)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
+    """
+
+
     scaler = GradScaler()
 
     # --------------------------------------
@@ -162,7 +184,7 @@ def main():
         correct = 0
         total = 0
 
-        for images, labels in train_loader:
+        for images, labels in tqdm(train_loader):
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
             with autocast():
@@ -186,7 +208,7 @@ def main():
         correct_val = 0
         total_val = 0
         with torch.no_grad():
-            for images, labels in val_loader:
+            for images, labels in tqdm(val_loader):
                 images, labels = images.to(device), labels.to(device)
                 with autocast():
                     outputs = model(images)
