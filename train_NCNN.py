@@ -55,20 +55,10 @@ def main():
     #AdamW
     num_epochs = 100
     batch_size = 512
-    #base_lr = 1e-2           # for AdamW
     weight_decay = 5e-4
-    T_0 = 10
-
-    learning_rate = 0.01
-    momentum = 0.9        
-
-    """
-    #SGD
-    num_epochs = 20
-    batch_size = 256
-    
-    """
-    
+    learning_rate = 1e-1
+    momentum = 0.9 
+    T_0 = 15
 
     # Early stopping parameters
     early_stopping_patience = 10  # Number of epochs to wait without improvement
@@ -235,7 +225,7 @@ def main():
                     'best_val_loss': best_val_loss,
                     'epochs_no_improve': epochs_no_improve
                 }
-            save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch_{epoch}.pth')
+            save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch.pth')
         else:
             epochs_no_improve += 1
             print(f"No improvement in validation loss for {epochs_no_improve} epoch(s).")

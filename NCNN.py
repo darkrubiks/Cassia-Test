@@ -57,7 +57,7 @@ class NCNN(nn.Module):
                                         stride=10,
                                         padding=0)
         
-        self.dropout_3 = nn.Dropout(0.1)
+        self.dropout_3 = nn.Dropout(0.5)
         # Merge Branch
         self.conv_4 = nn.Conv2d(in_channels=64 + 64 + 3,
                                 out_channels=64,
@@ -72,7 +72,7 @@ class NCNN(nn.Module):
         self.fc_4 = nn.Linear(in_features=5 * 5 * 64, 
                               out_features=512)
         
-        self.dropout_4 = nn.Dropout(0.1)
+        self.dropout_4 = nn.Dropout(0.5)
 
         self.output = nn.Linear(in_features=512, 
                                 out_features=1)
