@@ -107,11 +107,11 @@ def main():
     train_sampler = DistributedSampler(train_dataset, shuffle=True)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
-                              num_workers=4, pin_memory=True)
+                              num_workers=8, pin_memory=True)
     
     if rank == 0:
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
-                                num_workers=4, pin_memory=True)
+                                num_workers=8, pin_memory=True)
     else:
         val_loader = None
 
@@ -175,7 +175,7 @@ def main():
             loader = train_loader
 
         for images, labels in loader:
-            images, labels = images.to(device), labels.to(device)
+            images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
             optimizer.zero_grad()
             with autocast():
                 outputs = model(images)
