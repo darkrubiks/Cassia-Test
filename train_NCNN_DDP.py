@@ -46,8 +46,6 @@ def main():
     rank = dist.get_rank()
     world_size = dist.get_world_size()
 
-    
-
     torch.manual_seed(1234)
     
     # --------------------------------------
@@ -209,6 +207,7 @@ def main():
         global_total = total_tensor.item()
         train_loss = running_loss_tensor.item() / global_total
         train_acc = 100. * correct_tensor.item() / global_total
+        print(train_acc)
 
         if rank == 0 and val_loader is not None:
             model.eval()

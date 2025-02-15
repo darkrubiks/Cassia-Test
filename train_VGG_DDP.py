@@ -112,8 +112,12 @@ def main():
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
                               num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler,
-                            num_workers=4, pin_memory=True)
+    
+    if rank == 0:
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
+                                num_workers=4, pin_memory=True)
+    else:
+        val_loader = None
 
     # --------------------------------------
     # Model Setup
@@ -158,7 +162,7 @@ def main():
             if rank == 0:
                 print("No checkpoint found. Starting training from scratch.")
 
-   # --------------------------------------
+    # --------------------------------------
     # Training Loop with Early Stopping
     # --------------------------------------
     for epoch in range(start_epoch, num_epochs):
@@ -210,52 +214,33 @@ def main():
         train_loss = running_loss_tensor.item() / global_total
         train_acc = 100. * correct_tensor.item() / global_total
 
-        # Validation
-        model.eval()
-        val_loss = 0.0
-        correct_val = 0
-        total_val = 0
+        if rank == 0 and val_loader is not None:
+            model.eval()
+            val_loss = 0.0
+            correct_val = 0
+            total_val = 0
+            with torch.no_grad():
+                for images, labels in tqdm(val_loader, desc=f"Rank {rank} Epoch {epoch+1} validation"):
+                    images, labels = images.to(device), labels.to(device)
+                    with autocast():
+                        outputs = model(images)
+                        loss = criterion(outputs, labels)
+                    val_loss += loss.item() * images.size(0)
+                    _, predicted = torch.max(outputs, 1)
+                    total_val += labels.size(0)
+                    correct_val += (predicted == labels).sum().item()
+            val_loss /= total_val
+            val_acc = 100. * correct_val / total_val
 
-        # Only show progress bar on rank 0
-        if rank == 0:
-            loader = tqdm(val_loader, desc=f"Epoch {epoch+1}")
-        else:
-            loader = val_loader
+            scheduler.step()
+            current_lr = scheduler.get_last_lr()[0]
 
-        with torch.no_grad():
-            for images, labels in loader:
-                images, labels = images.to(device), labels.to(device)
-                with autocast():
-                    outputs = model(images)
-                    loss = criterion(outputs, labels)
-                val_loss += loss.item() * images.size(0)
-                _, predicted = torch.max(outputs, 1)
-                total_val += labels.size(0)
-                correct_val += (predicted == labels).sum().item()
-        # Aggregate validation metrics
-        total_val_tensor = torch.tensor(total_val, device=device, dtype=torch.float32)
-        val_loss_tensor = torch.tensor(val_loss, device=device)
-        correct_val_tensor = torch.tensor(correct_val, device=device, dtype=torch.float32)
-
-        dist.all_reduce(total_val_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(val_loss_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(correct_val_tensor, op=dist.ReduceOp.SUM)
-
-        global_total_val = total_val_tensor.item()
-        val_loss = val_loss_tensor.item() / global_total_val
-        val_acc = 100. * correct_val_tensor.item() / global_total_val
-
-        scheduler.step()
-        current_lr = scheduler.get_last_lr()[0]
-
-        if rank == 0:
             print(f"Epoch [{epoch+1}/{num_epochs}]: "
                   f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
                   f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | "
                   f"LR: {current_lr:.6f} | {batches_per_sec:.2f} batches/s, {images_per_sec:.2f} images/s")
 
-        # Early Stopping: Check for improvement in validation loss (only rank 0)
-        if rank == 0:
+            # Early Stopping: Check for improvement in validation loss (only rank 0)
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 epochs_no_improve = 0
@@ -276,6 +261,10 @@ def main():
                     print("Early stopping triggered!")
                     # Optionally save final checkpoint here
                     break
+        else:
+            scheduler.step()
+
+        dist.barrier()  # synchronize all processes
 
     if rank == 0:
         print("Training complete.")
