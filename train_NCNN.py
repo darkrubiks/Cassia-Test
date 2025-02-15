@@ -12,6 +12,7 @@ from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 from NCNN import NCNN
 
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Train NCNN on CASIA-WebFace with resume and early stopping")
     parser.add_argument('--resume', action='store_true', help="Resume training from the latest checkpoint if available")
