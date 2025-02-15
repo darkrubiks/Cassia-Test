@@ -55,7 +55,7 @@ def main():
     # Hyperparameters & Settings
     # --------------------------------------
     num_epochs = 1000
-    batch_size = 128
+    batch_size = 32
     weight_decay = 5e-4
     learning_rate = 1e-2
     momentum = 0.9 
@@ -179,7 +179,7 @@ def main():
             loader = train_loader
 
         for images, labels in loader:
-            images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
+            images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
             with autocast():
                 outputs = model(images)
@@ -212,57 +212,71 @@ def main():
         train_loss = running_loss_tensor.item() / global_total
         train_acc = 100. * correct_tensor.item() / global_total
 
-        if rank == 0 and val_loader is not None:
-            model.eval()
-            val_loss = 0.0
-            correct_val = 0
-            total_val = 0
-            with torch.no_grad():
-                for images, labels in tqdm(val_loader, desc=f"Rank {rank} Epoch {epoch+1} validation"):
-                    images, labels = images.to(device), labels.to(device)
-                    with autocast():
-                        outputs = model(images)
-                        loss = criterion(outputs, labels)
-                    val_loss += loss.item() * images.size(0)
-                    _, predicted = torch.max(outputs, 1)
-                    total_val += labels.size(0)
-                    correct_val += (predicted == labels).sum().item()
-            val_loss /= total_val
-            val_acc = 100. * correct_val / total_val
-
-            scheduler.step()
-            current_lr = scheduler.get_last_lr()[0]
-
-            print(f"Epoch [{epoch+1}/{num_epochs}]: "
-                  f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
-                  f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | "
-                  f"LR: {current_lr:.6f} | {batches_per_sec:.2f} batches/s, {images_per_sec:.2f} images/s")
-
-            # Early Stopping: Check for improvement in validation loss (only rank 0)
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                epochs_no_improve = 0
-                checkpoint = {
-                        'epoch': epoch + 1,
-                        'model_state_dict': model.module.state_dict(),  # save the underlying model
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        'scheduler_state_dict': scheduler.state_dict(),
-                        'scaler_state_dict': scaler.state_dict(),
-                        'best_val_loss': best_val_loss,
-                        'epochs_no_improve': epochs_no_improve
-                    }
-                save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch.pth')
-            else:
-                epochs_no_improve += 1
-                print(f"No improvement in validation loss for {epochs_no_improve} epoch(s).")
-                if epochs_no_improve >= early_stopping_patience:
-                    print("Early stopping triggered!")
-                    # Optionally save final checkpoint here
-                    break
+        # Only show progress bar on rank 0
+        if rank == 0:
+            loader = tqdm(val_loader, desc=f"Epoch {epoch+1}")
         else:
-            scheduler.step()
+            loader = val_loader
 
-        dist.barrier()  # synchronize all processes
+        model.eval()
+        val_loss = 0.0
+        correct_val = 0
+        total_val = 0
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to(device), labels.to(device)
+                with autocast():
+                    outputs = model(images)
+                    loss = criterion(outputs, labels)
+                val_loss += loss.item() * images.size(0)
+                _, predicted = torch.max(outputs, 1)
+                total_val += labels.size(0)
+                correct_val += (predicted == labels).sum().item()
+
+        # Aggregate training loss and accuracy across processes
+        total_tensor = torch.tensor(total_val, device=device, dtype=torch.float32)
+        running_loss_tensor = torch.tensor(val_loss, device=device)
+        correct_tensor = torch.tensor(correct_val, device=device, dtype=torch.float32)
+
+        dist.all_reduce(total_tensor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(running_loss_tensor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(correct_tensor, op=dist.ReduceOp.SUM)
+
+        global_total = total_tensor.item()
+        val_loss = running_loss_tensor.item() / global_total
+        val_acc = 100. * correct_tensor.item() / global_total
+
+        scheduler.step()
+        current_lr = scheduler.get_last_lr()[0]
+
+        print(f"Epoch [{epoch+1}/{num_epochs}]: "
+                f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
+                f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | "
+                f"LR: {current_lr:.6f} | {batches_per_sec:.2f} batches/s, {images_per_sec:.2f} images/s")
+
+        # Early Stopping: Check for improvement in validation loss (only rank 0)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_no_improve = 0
+            checkpoint = {
+                    'epoch': epoch + 1,
+                    'model_state_dict': model.module.state_dict(),  # save the underlying model
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
+                    'scaler_state_dict': scaler.state_dict(),
+                    'best_val_loss': best_val_loss,
+                    'epochs_no_improve': epochs_no_improve
+                }
+            save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch.pth')
+        else:
+            epochs_no_improve += 1
+            print(f"No improvement in validation loss for {epochs_no_improve} epoch(s).")
+            if epochs_no_improve >= early_stopping_patience:
+                print("Early stopping triggered!")
+                # Optionally save final checkpoint here
+                break
+
+    dist.barrier()  # synchronize all processes
 
     if rank == 0:
         print("Training complete.")
