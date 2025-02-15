@@ -39,7 +39,7 @@ def main():
     # Hyperparameters & Settings
     # --------------------------------------
     num_epochs = 1000
-    batch_size = 512
+    batch_size = 32
     weight_decay = 5e-4
     learning_rate = 1e-2
     momentum = 0.9 
@@ -102,8 +102,8 @@ def main():
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs")
         model = nn.DataParallel(model, device_ids=[0,1,2,3])
-    #model = model.to(device)
-    
+    model = model.to(device)
+
     # --------------------------------------
     # Optimizer, Loss, Scheduler, and Mixed Precision
     # --------------------------------------
