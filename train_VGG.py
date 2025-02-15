@@ -111,9 +111,9 @@ def main():
     val_sampler = DistributedSampler(val_dataset, shuffle=False)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
-                              num_workers=16, pin_memory=True)
+                              num_workers=4, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler,
-                            num_workers=16, pin_memory=True)
+                            num_workers=4, pin_memory=True)
 
     # --------------------------------------
     # Model Setup
@@ -215,7 +215,7 @@ def main():
         val_loss = 0.0
         correct_val = 0
         total_val = 0
-        
+
         # Only show progress bar on rank 0
         if rank == 0:
             loader = tqdm(val_loader, desc=f"Epoch {epoch+1}")

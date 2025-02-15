@@ -110,9 +110,9 @@ def main():
     val_sampler = DistributedSampler(val_dataset, shuffle=False)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
-                              num_workers=16, pin_memory=True)
+                              num_workers=4, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler,
-                            num_workers=16, pin_memory=True)
+                            num_workers=4, pin_memory=True)
 
     # --------------------------------------
     # Model Setup
