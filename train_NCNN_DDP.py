@@ -34,7 +34,6 @@ def save_checkpoint(state, checkpoint_dir, filename):
         os.makedirs(checkpoint_dir)
     checkpoint_path = os.path.join(checkpoint_dir, filename)
     torch.save(state, checkpoint_path)
-    print(f"Checkpoint saved at {checkpoint_path}")
 
 def main():
     args = parse_args()
@@ -168,7 +167,7 @@ def main():
 
         # Only show progress bar on rank 0
         if rank == 0:
-            loader = tqdm(train_loader, desc=f"Epoch {epoch+1}")
+            loader = tqdm(train_loader, desc=f"Train Epoch {epoch+1}")
         else:
             loader = train_loader
 
@@ -198,6 +197,7 @@ def main():
         running_loss_tensor = torch.tensor(running_loss, device=device)
         correct_tensor = torch.tensor(correct, device=device, dtype=torch.float32)
 
+        dist.barrier()
         dist.all_reduce(total_tensor, op=dist.ReduceOp.SUM)
         dist.all_reduce(running_loss_tensor, op=dist.ReduceOp.SUM)
         dist.all_reduce(correct_tensor, op=dist.ReduceOp.SUM)
@@ -208,7 +208,7 @@ def main():
 
         # Only show progress bar on rank 0
         if rank == 0:
-            loader = tqdm(val_loader, desc=f"Epoch {epoch+1}")
+            loader = tqdm(val_loader, desc=f"Test Epoch {epoch+1}")
         else:
             loader = val_loader
 
@@ -216,12 +216,12 @@ def main():
         val_loss = 0.0
         correct_val = 0
         total_val = 0
-        with torch.no_grad():
+        with torch.inference_mode():
             for images, labels in val_loader:
-                images, labels = images.to(device), labels.to(device)
-                with autocast():
-                    outputs = model(images)
-                    loss = criterion(outputs, labels)
+                images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+
                 val_loss += loss.item() * images.size(0)
                 _, predicted = torch.max(outputs, 1)
                 total_val += labels.size(0)
@@ -232,6 +232,7 @@ def main():
         running_loss_tensor = torch.tensor(val_loss, device=device)
         correct_tensor = torch.tensor(correct_val, device=device, dtype=torch.float32)
 
+        dist.barrier()
         dist.all_reduce(total_tensor, op=dist.ReduceOp.SUM)
         dist.all_reduce(running_loss_tensor, op=dist.ReduceOp.SUM)
         dist.all_reduce(correct_tensor, op=dist.ReduceOp.SUM)
@@ -243,10 +244,11 @@ def main():
         scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
 
-        print(f"Epoch [{epoch+1}/{num_epochs}]: "
-                f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
-                f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | "
-                f"LR: {current_lr:.6f} | {batches_per_sec:.2f} batches/s, {images_per_sec:.2f} images/s")
+        if rank == 0:
+            print(f"Epoch [{epoch+1}/{num_epochs}]: "
+                    f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
+                    f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | "
+                    f"LR: {current_lr:.6f} | {batches_per_sec:.2f} batches/s, {images_per_sec:.2f} images/s")
 
         # Early Stopping: Check for improvement in validation loss (only rank 0)
         if val_loss < best_val_loss:
@@ -262,6 +264,8 @@ def main():
                     'epochs_no_improve': epochs_no_improve
                 }
             save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch.pth')
+            if rank == 0:
+                print(f"Checkpoint saved at {checkpoint_dir}")
         else:
             epochs_no_improve += 1
             print(f"No improvement in validation loss for {epochs_no_improve} epoch(s).")
@@ -269,8 +273,6 @@ def main():
                 print("Early stopping triggered!")
                 # Optionally save final checkpoint here
                 break
-
-    dist.barrier()  # synchronize all processes
 
     if rank == 0:
         print("Training complete.")
