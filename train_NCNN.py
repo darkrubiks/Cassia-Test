@@ -32,7 +32,7 @@ def save_checkpoint(state, checkpoint_dir, filename):
     print(f"Checkpoint saved at {checkpoint_path}")
 
 def main():
-    torch.seed(1234)
+    torch.manual_seed(1234)
     args = parse_args()
 
     # --------------------------------------
