@@ -106,16 +106,14 @@ def main():
 
     # Create Distributed Samplers for training and validation
     train_sampler = DistributedSampler(train_dataset)
+    val_sampler = DistributedSampler(val_dataset, shuffle=False)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
                               num_workers=8, pin_memory=True)
     
-    if rank == 0:
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
-                                num_workers=8, pin_memory=True)
-    else:
-        val_loader = None
-
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler,
+                            num_workers=8, pin_memory=True)
+    
     # --------------------------------------
     # Model Setup
     # --------------------------------------
