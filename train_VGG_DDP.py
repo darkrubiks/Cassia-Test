@@ -97,7 +97,6 @@ def main():
 
     full_dataset = ImageFolder(root=dataset_dir, transform=train_transforms)
     num_classes = len(full_dataset.classes)
-    print(f"Number of classes: {num_classes}")
     if rank == 0:
         print(f"Number of classes: {num_classes}")
 
@@ -107,7 +106,7 @@ def main():
     val_dataset.dataset.transform = val_transforms
 
     # Create Distributed Samplers for training and validation
-    train_sampler = DistributedSampler(train_dataset, shuffle=False)
+    train_sampler = DistributedSampler(train_dataset)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
                               num_workers=8, pin_memory=True)
