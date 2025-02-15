@@ -54,7 +54,7 @@ def main():
     # Hyperparameters & Settings
     # --------------------------------------
     num_epochs = 1000
-    batch_size = 32
+    batch_size = 64
     weight_decay = 5e-4
     learning_rate = 1e-2
     momentum = 0.9 
@@ -119,7 +119,7 @@ def main():
     # --------------------------------------
     # Model Setup
     # --------------------------------------
-    model = models.vgg16_bn(weights=None)
+    model = models.vgg16(weights=None, dropout=0.5)
     in_features = model.classifier[6].in_features
     model.classifier[6] = nn.Linear(in_features, num_classes)
 
