@@ -212,8 +212,15 @@ def main():
         val_loss = 0.0
         correct_val = 0
         total_val = 0
+
+        # Only show progress bar on rank 0
+        if rank == 0:
+            loader = tqdm(val_loader, desc=f"Epoch {epoch+1}")
+        else:
+            loader = val_loader
+
         with torch.no_grad():
-            for images, labels in val_loader:
+            for images, labels in loader:
                 images, labels = images.to(device), labels.to(device)
                 with autocast():
                     outputs = model(images)

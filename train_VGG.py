@@ -215,8 +215,15 @@ def main():
         val_loss = 0.0
         correct_val = 0
         total_val = 0
+        
+        # Only show progress bar on rank 0
+        if rank == 0:
+            loader = tqdm(val_loader, desc=f"Epoch {epoch+1}")
+        else:
+            loader = val_loader
+
         with torch.no_grad():
-            for images, labels in val_loader:
+            for images, labels in loader:
                 images, labels = images.to(device), labels.to(device)
                 with autocast():
                     outputs = model(images)
@@ -225,7 +232,6 @@ def main():
                 _, predicted = torch.max(outputs, 1)
                 total_val += labels.size(0)
                 correct_val += (predicted == labels).sum().item()
-
         # Aggregate validation metrics
         total_val_tensor = torch.tensor(total_val, device=device, dtype=torch.float32)
         val_loss_tensor = torch.tensor(val_loss, device=device)
