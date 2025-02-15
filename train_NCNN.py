@@ -1,14 +1,13 @@
 import os
-import math
 import argparse
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingWarmRestarts
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
-from torchvision import models
 from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 from NCNN import NCNN
@@ -23,21 +22,7 @@ def parse_args():
 def find_latest_checkpoint(checkpoint_dir):
     if not os.path.exists(checkpoint_dir):
         return None
-    files = [f for f in os.listdir(checkpoint_dir) if f.startswith("checkpoint_epoch_") and f.endswith(".pth")]
-    if not files:
-        return None
-    epochs = []
-    for f in files:
-        try:
-            epoch_str = f.split("_")[-1].replace(".pth", "")
-            epoch_num = int(epoch_str)
-            epochs.append((epoch_num, f))
-        except Exception as e:
-            continue
-    if not epochs:
-        return None
-    latest_epoch, latest_file = max(epochs, key=lambda x: x[0])
-    return os.path.join(checkpoint_dir, latest_file), latest_epoch
+    return os.path.join(checkpoint_dir, "checkpoint_epoch.pth")
 
 def save_checkpoint(state, checkpoint_dir, filename):
     if not os.path.exists(checkpoint_dir):
@@ -47,21 +32,21 @@ def save_checkpoint(state, checkpoint_dir, filename):
     print(f"Checkpoint saved at {checkpoint_path}")
 
 def main():
+    torch.seed(1234)
     args = parse_args()
 
     # --------------------------------------
     # Hyperparameters & Settings
     # --------------------------------------
-    #AdamW
-    num_epochs = 100
+    num_epochs = 1000
     batch_size = 512
     weight_decay = 5e-4
-    learning_rate = 1e-1
+    learning_rate = 1e-2
     momentum = 0.9 
-    T_0 = 15
+    T_0 = 5
 
     # Early stopping parameters
-    early_stopping_patience = 10  # Number of epochs to wait without improvement
+    early_stopping_patience = 20  # Number of epochs to wait without improvement
     best_val_loss = float('inf')
     epochs_no_improve = 0
 
@@ -114,28 +99,18 @@ def main():
     in_features = model.output.in_features
     model.output = nn.Linear(in_features, num_classes)
 
-    if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs")
-        model = nn.DataParallel(model)
+    #if torch.cuda.device_count() > 1:
+    #    print(f"Using {torch.cuda.device_count()} GPUs")
+    #    model = nn.DataParallel(model)
     model = model.to(device)
 
     # --------------------------------------
     # Optimizer, Loss, Scheduler, and Mixed Precision
     # --------------------------------------
-    #optimizer = optim.AdamW(model.parameters(), lr=base_lr, weight_decay=weight_decay)#AdamW
     optimizer = optim.SGD(model.parameters(), lr=learning_rate,
                           momentum=momentum, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss()
-    scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=T_0, T_mult=1, eta_min=1e-5)
-    
-    """
-    #SGD
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate,
-                          momentum=momentum, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
-    """
-
+    scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=T_0, T_mult=2, eta_min=1e-5)
 
     scaler = GradScaler()
 
@@ -146,7 +121,7 @@ def main():
     if args.resume:
         checkpoint_info = find_latest_checkpoint(checkpoint_dir)
         if checkpoint_info is not None:
-            checkpoint_path, loaded_epoch = checkpoint_info
+            checkpoint_path = checkpoint_info
             print(f"Resuming from checkpoint: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path, map_location=device)
             model.load_state_dict(checkpoint['model_state_dict'])
@@ -165,9 +140,11 @@ def main():
     # --------------------------------------
     for epoch in range(start_epoch, num_epochs):
         model.train()
+        epoch_start = time.time()  # start time for epoch
         running_loss = 0.0
         correct = 0
         total = 0
+        num_batches = 0
 
         for images, labels in tqdm(train_loader):
             images, labels = images.to(device), labels.to(device)
@@ -183,6 +160,12 @@ def main():
             _, predicted = torch.max(outputs, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
+            num_batches += 1
+
+        epoch_end = time.time()
+        epoch_time = epoch_end - epoch_start
+        batches_per_sec = num_batches / epoch_time
+        images_per_sec = (num_batches * batch_size) / epoch_time
 
         train_loss = running_loss / total
         train_acc = 100. * correct / total
@@ -210,7 +193,9 @@ def main():
         current_lr = scheduler.get_last_lr()[0]
         print(f"Epoch [{epoch+1}/{num_epochs}]: "
               f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
-              f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | LR: {current_lr:.6f}")
+              f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | "
+              f"LR: {current_lr:.6f} | {batches_per_sec:.2f} batches/s, {images_per_sec:.2f} images/s")
+
 
         # Early Stopping: Check for improvement in validation loss.
         if val_loss < best_val_loss:
