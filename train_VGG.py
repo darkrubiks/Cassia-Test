@@ -99,10 +99,10 @@ def main():
     in_features = model.classifier[6].in_features
     model.classifier[6] = nn.Linear(in_features, num_classes)
 
-    #if torch.cuda.device_count() > 1:
-    #    print(f"Using {torch.cuda.device_count()} GPUs")
-    #    model = nn.DataParallel(model)
-    model = model.to(device)
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs")
+        model = nn.DataParallel(model, device_ids=[0,1,2,3])
+    #model = model.to(device)
 
     # --------------------------------------
     # Optimizer, Loss, Scheduler, and Mixed Precision
