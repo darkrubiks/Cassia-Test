@@ -42,9 +42,11 @@ def main():
 
     # Initialize process group for DDP
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl")
+    
     rank = dist.get_rank()
     world_size = dist.get_world_size()
+
+    dist.init_process_group(backend="nccl", world_size=world_size, rank=rank)
 
     torch.manual_seed(1234)
     
@@ -108,9 +110,9 @@ def main():
     val_sampler = DistributedSampler(val_dataset, shuffle=False)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
-                              num_workers=4, pin_memory=True)
+                              num_workers=16, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler,
-                            num_workers=4, pin_memory=True)
+                            num_workers=16, pin_memory=True)
 
     # --------------------------------------
     # Model Setup
@@ -118,7 +120,7 @@ def main():
     model = NCNN()
     in_features = model.output.in_features
     model.output = nn.Linear(in_features, num_classes)
-    model = model.to(device)
+    #model = model.to(device)
     model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
 
     # --------------------------------------
