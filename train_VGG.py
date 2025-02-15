@@ -12,16 +12,10 @@ from torchvision import models
 from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 
-import torch.distributed as dist
-from torch.utils.data.distributed import DistributedSampler
-
-
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train NCNN on CASIA-WebFace with DDP, resume, and early stopping")
+    parser = argparse.ArgumentParser(description="Train VGG on CASIA-WebFace with resume and early stopping")
     parser.add_argument('--resume', action='store_true', help="Resume training from the latest checkpoint if available")
     parser.add_argument('--checkpoint_dir', type=str, default='./checkpoints', help="Directory to save/load checkpoints")
-    # local_rank is passed automatically when launching with torchrun or the distributed launcher.
-    parser.add_argument("--local_rank", type=int, default=0, help="Local rank for DistributedDataParallel")
     args = parser.parse_args()
     return args
 
@@ -38,24 +32,14 @@ def save_checkpoint(state, checkpoint_dir, filename):
     print(f"Checkpoint saved at {checkpoint_path}")
 
 def main():
-    args = parse_args()
-    local_rank = int(os.environ.get("LOCAL_RANK", args.local_rank))
-    print(local_rank)
-    # Initialize process group for DDP
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl")
-    rank = dist.get_rank()
-    world_size = dist.get_world_size()
-
-    
-
     torch.manual_seed(1234)
+    args = parse_args()
 
     # --------------------------------------
     # Hyperparameters & Settings
     # --------------------------------------
     num_epochs = 1000
-    batch_size = 512
+    batch_size = 256 
     weight_decay = 5e-4
     learning_rate = 1e-2
     momentum = 0.9 
@@ -71,10 +55,9 @@ def main():
     # Path to your CASIA-WebFace dataset (organized as root/class/images)
     dataset_dir = 'casia-webface'  # UPDATE THIS PATH
 
-    # Use GPU based on local_rank
-    device = torch.device("cuda", local_rank)
-    if rank == 0:
-        print(f"Using device: {device} | World Size: {world_size}")
+    # Use GPU if available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
 
     # --------------------------------------
     # Data Preparation & Augmentation
@@ -98,22 +81,16 @@ def main():
     full_dataset = ImageFolder(root=dataset_dir, transform=train_transforms)
     num_classes = len(full_dataset.classes)
     print(f"Number of classes: {num_classes}")
-    if rank == 0:
-        print(f"Number of classes: {num_classes}")
 
     train_size = int(0.9 * len(full_dataset))
     val_size = len(full_dataset) - train_size
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
     val_dataset.dataset.transform = val_transforms
 
-    # Create Distributed Samplers for training and validation
-    train_sampler = DistributedSampler(train_dataset, shuffle=True)
-    val_sampler = DistributedSampler(val_dataset, shuffle=False)
-
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
-                              num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler,
-                            num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                              num_workers=16, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
+                            num_workers=16, pin_memory=True)
 
     # --------------------------------------
     # Model Setup
@@ -122,9 +99,10 @@ def main():
     in_features = model.classifier[6].in_features
     model.classifier[6] = nn.Linear(in_features, num_classes)
 
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs")
+        model = nn.DataParallel(model)
     model = model.to(device)
-    model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
-
 
     # --------------------------------------
     # Optimizer, Loss, Scheduler, and Mixed Precision
@@ -142,9 +120,9 @@ def main():
     if args.resume:
         checkpoint_info = find_latest_checkpoint(checkpoint_dir)
         if checkpoint_info is not None:
-            if rank == 0:
-                print(f"Resuming from checkpoint: {checkpoint_info}")
-            checkpoint = torch.load(checkpoint_info, map_location=device)
+            checkpoint_path = checkpoint_info
+            print(f"Resuming from checkpoint: {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=device)
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -152,17 +130,14 @@ def main():
             start_epoch = checkpoint['epoch']
             best_val_loss = checkpoint.get('best_val_loss', best_val_loss)
             epochs_no_improve = checkpoint.get('epochs_no_improve', 0)
-            if rank == 0:
-                print(f"Resumed at epoch {start_epoch}")
+            print(f"Resumed at epoch {start_epoch}")
         else:
-            if rank == 0:
-                print("No checkpoint found. Starting training from scratch.")
+            print("No checkpoint found. Starting training from scratch.")
 
-   # --------------------------------------
+    # --------------------------------------
     # Training Loop with Early Stopping
     # --------------------------------------
     for epoch in range(start_epoch, num_epochs):
-        train_sampler.set_epoch(epoch)  # Shuffle data differently each epoch for DDP
         model.train()
         epoch_start = time.time()  # start time for epoch
         running_loss = 0.0
@@ -170,13 +145,7 @@ def main():
         total = 0
         num_batches = 0
 
-        # Only show progress bar on rank 0
-        if rank == 0:
-            loader = tqdm(train_loader, desc=f"Epoch {epoch+1}")
-        else:
-            loader = train_loader
-
-        for images, labels in loader:
+        for images, labels in tqdm(train_loader):
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
             with autocast():
@@ -197,33 +166,16 @@ def main():
         batches_per_sec = num_batches / epoch_time
         images_per_sec = (num_batches * batch_size) / epoch_time
 
-        # Aggregate training loss and accuracy across processes
-        total_tensor = torch.tensor(total, device=device, dtype=torch.float32)
-        running_loss_tensor = torch.tensor(running_loss, device=device)
-        correct_tensor = torch.tensor(correct, device=device, dtype=torch.float32)
-
-        dist.all_reduce(total_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(running_loss_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(correct_tensor, op=dist.ReduceOp.SUM)
-
-        global_total = total_tensor.item()
-        train_loss = running_loss_tensor.item() / global_total
-        train_acc = 100. * correct_tensor.item() / global_total
+        train_loss = running_loss / total
+        train_acc = 100. * correct / total
 
         # Validation
         model.eval()
         val_loss = 0.0
         correct_val = 0
         total_val = 0
-
-        # Only show progress bar on rank 0
-        if rank == 0:
-            loader = tqdm(val_loader, desc=f"Epoch {epoch+1}")
-        else:
-            loader = val_loader
-
         with torch.no_grad():
-            for images, labels in loader:
+            for images, labels in tqdm(val_loader):
                 images, labels = images.to(device), labels.to(device)
                 with autocast():
                     outputs = model(images)
@@ -232,54 +184,41 @@ def main():
                 _, predicted = torch.max(outputs, 1)
                 total_val += labels.size(0)
                 correct_val += (predicted == labels).sum().item()
-        # Aggregate validation metrics
-        total_val_tensor = torch.tensor(total_val, device=device, dtype=torch.float32)
-        val_loss_tensor = torch.tensor(val_loss, device=device)
-        correct_val_tensor = torch.tensor(correct_val, device=device, dtype=torch.float32)
 
-        dist.all_reduce(total_val_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(val_loss_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(correct_val_tensor, op=dist.ReduceOp.SUM)
-
-        global_total_val = total_val_tensor.item()
-        val_loss = val_loss_tensor.item() / global_total_val
-        val_acc = 100. * correct_val_tensor.item() / global_total_val
+        val_loss = val_loss / total_val
+        val_acc = 100. * correct_val / total_val
 
         scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
+        print(f"Epoch [{epoch+1}/{num_epochs}]: "
+              f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
+              f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | "
+              f"LR: {current_lr:.6f} | {batches_per_sec:.2f} batches/s, {images_per_sec:.2f} images/s")
 
-        if rank == 0:
-            print(f"Epoch [{epoch+1}/{num_epochs}]: "
-                  f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
-                  f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | "
-                  f"LR: {current_lr:.6f} | {batches_per_sec:.2f} batches/s, {images_per_sec:.2f} images/s")
+         # Early Stopping: Check for improvement in validation loss.
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_no_improve = 0
+            checkpoint = {
+                    'epoch': epoch + 1,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
+                    'scaler_state_dict': scaler.state_dict(),
+                    'best_val_loss': best_val_loss,
+                    'epochs_no_improve': epochs_no_improve
+                }
+            save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch.pth')
+        else:
+            epochs_no_improve += 1
+            print(f"No improvement in validation loss for {epochs_no_improve} epoch(s).")
+            if epochs_no_improve >= early_stopping_patience:
+                print("Early stopping triggered!")
+                # Save final checkpoint before stopping.
+                
+                return  # Stop training early
 
-        # Early Stopping: Check for improvement in validation loss (only rank 0)
-        if rank == 0:
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                epochs_no_improve = 0
-                checkpoint = {
-                        'epoch': epoch + 1,
-                        'model_state_dict': model.module.state_dict(),  # save the underlying model
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        'scheduler_state_dict': scheduler.state_dict(),
-                        'scaler_state_dict': scaler.state_dict(),
-                        'best_val_loss': best_val_loss,
-                        'epochs_no_improve': epochs_no_improve
-                    }
-                save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch.pth')
-            else:
-                epochs_no_improve += 1
-                print(f"No improvement in validation loss for {epochs_no_improve} epoch(s).")
-                if epochs_no_improve >= early_stopping_patience:
-                    print("Early stopping triggered!")
-                    # Optionally save final checkpoint here
-                    break
-
-    if rank == 0:
-        print("Training complete.")
-    dist.destroy_process_group()
+    print("Training complete.")
 
 if __name__ == '__main__':
     main()
