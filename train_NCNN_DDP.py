@@ -32,21 +32,7 @@ def init_distributed(args):
 def find_latest_checkpoint(checkpoint_dir):
     if not os.path.exists(checkpoint_dir):
         return None
-    files = [f for f in os.listdir(checkpoint_dir) if f.startswith("checkpoint_epoch_") and f.endswith(".pth")]
-    if not files:
-        return None
-    epochs = []
-    for f in files:
-        try:
-            epoch_str = f.split("_")[-1].replace(".pth", "")
-            epoch_num = int(epoch_str)
-            epochs.append((epoch_num, f))
-        except Exception as e:
-            continue
-    if not epochs:
-        return None
-    latest_epoch, latest_file = max(epochs, key=lambda x: x[0])
-    return os.path.join(checkpoint_dir, latest_file), latest_epoch
+    return os.path.join(checkpoint_dir, "checkpoint_epoch.pth")
 
 def save_checkpoint(state, checkpoint_dir, filename):
     if not os.path.exists(checkpoint_dir):
@@ -58,9 +44,15 @@ def save_checkpoint(state, checkpoint_dir, filename):
 
 def main():
     args = parse_args()
-    device = init_distributed(args)
+    local_rank = int(os.environ.get("LOCAL_RANK", args.local_rank))
+    print(local_rank)
+    # Initialize process group for DDP
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group(backend="nccl")
     rank = dist.get_rank()
     world_size = dist.get_world_size()
+    # Use GPU based on local_rank
+    device = torch.device("cuda", local_rank)
 
     torch.manual_seed(1234)
     
@@ -150,7 +142,7 @@ def main():
     if args.resume and rank == 0:
         checkpoint_info = find_latest_checkpoint(checkpoint_dir)
         if checkpoint_info is not None:
-            checkpoint_path, _ = checkpoint_info
+            checkpoint_path = checkpoint_info
             print(f"Rank {rank}: Resuming from checkpoint: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path, map_location=device)
             start_epoch = checkpoint['epoch']
@@ -247,7 +239,7 @@ def main():
                     'best_val_loss': best_val_loss,
                     'epochs_no_improve': epochs_no_improve
                 }
-                save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch_{epoch+1}.pth')
+                save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch.pth')
             else:
                 epochs_no_improve += 1
                 print(f"No improvement in validation loss for {epochs_no_improve} epoch(s).")
