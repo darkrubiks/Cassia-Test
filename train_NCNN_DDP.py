@@ -119,7 +119,7 @@ def main():
     in_features = model.output.in_features
     model.output = nn.Linear(in_features, num_classes)
     model = model.to(device)
-    model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
+    model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
 
     # --------------------------------------
     # Optimizer, Loss, Scheduler, and Mixed Precision

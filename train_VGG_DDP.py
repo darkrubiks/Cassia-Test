@@ -122,7 +122,7 @@ def main():
     model.classifier[6] = nn.Linear(in_features, num_classes)
 
     model = model.to(device)
-    model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
+    model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
 
 
     # --------------------------------------
@@ -221,6 +221,7 @@ def main():
         correct_val = 0
         total_val = 0
         with torch.inference_mode():
+            print('oi')
             for images, labels in val_loader:
                 images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
                 outputs = model(images)
