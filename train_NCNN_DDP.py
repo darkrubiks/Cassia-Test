@@ -104,7 +104,7 @@ def main():
     val_dataset.dataset.transform = val_transforms
 
     # Create Distributed Samplers for training and validation
-    train_sampler = DistributedSampler(train_dataset, shuffle=True)
+    train_sampler = DistributedSampler(train_dataset, shuffle=False)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
                               num_workers=8, pin_memory=True)
@@ -207,7 +207,6 @@ def main():
         global_total = total_tensor.item()
         train_loss = running_loss_tensor.item() / global_total
         train_acc = 100. * correct_tensor.item() / global_total
-        print(train_acc)
 
         if rank == 0 and val_loader is not None:
             model.eval()
