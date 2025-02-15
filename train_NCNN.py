@@ -39,7 +39,7 @@ def main():
     # Hyperparameters & Settings
     # --------------------------------------
     num_epochs = 1000
-    batch_size = 256
+    batch_size = 512
     weight_decay = 5e-4
     learning_rate = 1e-2
     momentum = 0.9 
@@ -88,9 +88,9 @@ def main():
     val_dataset.dataset.transform = val_transforms
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
-                              num_workers=16, pin_memory=True)
+                              num_workers=4, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
-                            num_workers=16, pin_memory=True)
+                            num_workers=4, pin_memory=True)
 
     # --------------------------------------
     # Model Setup
