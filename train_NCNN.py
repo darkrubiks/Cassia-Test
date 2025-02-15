@@ -42,11 +42,11 @@ def main():
 
     # Initialize process group for DDP
     torch.cuda.set_device(local_rank)
-    
+    dist.init_process_group(backend="nccl")
     rank = dist.get_rank()
     world_size = dist.get_world_size()
 
-    dist.init_process_group(backend="nccl", world_size=world_size, rank=rank)
+    
 
     torch.manual_seed(1234)
     
