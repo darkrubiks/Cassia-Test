@@ -221,7 +221,6 @@ def main():
         correct_val = 0
         total_val = 0
         with torch.inference_mode():
-            print(len(val_loader))
             for images, labels in val_loader:
                 images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
                 outputs = model(images)
