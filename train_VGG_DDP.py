@@ -269,8 +269,8 @@ def main():
                     'best_val_loss': best_val_loss,
                     'epochs_no_improve': epochs_no_improve
                 }
-            save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch.pth')
             if rank == 0:
+                save_checkpoint(checkpoint, checkpoint_dir, f'checkpoint_epoch.pth')
                 print(f"Checkpoint saved at {checkpoint_dir}")
         else:
             epochs_no_improve += 1
