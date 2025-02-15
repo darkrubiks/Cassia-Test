@@ -39,7 +39,7 @@ def save_checkpoint(state, checkpoint_dir, filename):
 def main():
     args = parse_args()
     local_rank = args.local_rank
-
+    print(local_rank)
     # Initialize process group for DDP
     torch.cuda.set_device(local_rank)
     dist.init_process_group(backend="nccl")
