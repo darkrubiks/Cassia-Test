@@ -108,11 +108,11 @@ def main():
     train_sampler = DistributedSampler(train_dataset)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
-                              num_workers=16, pin_memory=True)
+                              num_workers=8, pin_memory=True)
     
     if rank == 0:
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
-                                num_workers=16, pin_memory=True)
+                                num_workers=8, pin_memory=True)
     else:
         val_loader = None
 
