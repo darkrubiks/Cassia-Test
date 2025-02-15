@@ -54,7 +54,7 @@ def main():
     # Hyperparameters & Settings
     # --------------------------------------
     num_epochs = 1000
-    batch_size = 32
+    batch_size = 64
     weight_decay = 5e-4
     learning_rate = 1e-2
     momentum = 0.9 
