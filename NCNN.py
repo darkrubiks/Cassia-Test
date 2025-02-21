@@ -45,7 +45,7 @@ class NCNN(nn.Module):
                                         stride=3,
                                         padding=0)
         
-        self.dropout_2 = nn.Dropout(0.1)
+        self.dropout_2 = nn.Dropout(0.5)
         # Left Branch
         self.conv_3_1 = nn.Conv2d(in_channels=3,
                                   out_channels=64,

@@ -88,9 +88,9 @@ def main():
     val_dataset.dataset.transform = val_transforms
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
-                              num_workers=16, pin_memory=True)
+                              num_workers=4, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
-                            num_workers=16, pin_memory=True)
+                            num_workers=4, pin_memory=True)
 
     # --------------------------------------
     # Model Setup
