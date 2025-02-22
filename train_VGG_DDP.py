@@ -215,13 +215,11 @@ def main():
         train_acc = 100. * correct_tensor.item() / global_total
 
         # Only show progress bar on rank 0
-        #if rank == 0:
-            #loader = tqdm(val_loader, desc=f"Test Epoch {epoch+1}")
-        #else:
-            #loader = val_loader
-
-        loader = tqdm(val_loader, desc=f"Test Epoch {epoch+1}")
-
+        if rank == 0:
+            loader = tqdm(val_loader, desc=f"Test Epoch {epoch+1}")
+        else:
+            loader = val_loader
+            
         model.eval()
         val_loss = 0.0
         correct_val = 0
