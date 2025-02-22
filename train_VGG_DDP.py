@@ -54,7 +54,7 @@ def main():
     # Hyperparameters & Settings
     # --------------------------------------
     num_epochs = 200
-    batch_size = 64
+    batch_size = 32
     weight_decay = 5e-4
     learning_rate = 1e-2
     momentum = 0.9 
@@ -130,7 +130,7 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=learning_rate,
                           momentum=momentum, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss()
-    scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-5)
+    scheduler = CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-5)
 
     #scaler = GradScaler()
     # --------------------------------------
