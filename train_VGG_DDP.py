@@ -133,7 +133,7 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=learning_rate,
                           momentum=momentum, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss()
-    scheduler = CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-5)
+    scheduler = CosineAnnealingLR(optimizer, T_max=50, eta_min=1e-5)
 
     #scaler = GradScaler()
     # --------------------------------------
