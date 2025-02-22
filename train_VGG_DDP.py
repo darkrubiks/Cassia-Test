@@ -98,7 +98,7 @@ def main():
     if rank == 0:
         print(f"Number of classes: {num_classes}")
 
-    train_size = int(0.9 * len(full_dataset))
+    train_size = int(0.85 * len(full_dataset))
     val_size = len(full_dataset) - train_size
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
     val_dataset.dataset.transform = val_transforms
