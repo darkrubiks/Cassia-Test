@@ -108,7 +108,7 @@ def main():
 
     # Create Distributed Samplers for training and validation
     train_sampler = DistributedSampler(train_dataset)
-    val_sampler = DistributedSampler(val_dataset, shuffle=False, drop_last=True)
+    val_sampler = DistributedSampler(val_dataset, shuffle=False)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
                               num_workers=8, pin_memory=True)
@@ -215,11 +215,9 @@ def main():
         train_acc = 100. * correct_tensor.item() / global_total
 
         # Only show progress bar on rank 0
-        if rank == 0:
-            loader = tqdm(val_loader, desc=f"Test Epoch {epoch+1}")
-        else:
-            loader = val_loader
-            
+      
+        loader = tqdm(val_loader, desc=f"Test Epoch {epoch+1}")
+    
         model.eval()
         val_loss = 0.0
         correct_val = 0
