@@ -108,7 +108,7 @@ def main():
 
     # Create Distributed Samplers for training and validation
     train_sampler = DistributedSampler(train_dataset)
-    val_sampler = DistributedSampler(val_dataset, shuffle=False)
+    val_sampler = DistributedSampler(val_dataset, shuffle=False, drop_last=True)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
                               num_workers=8, pin_memory=True)
