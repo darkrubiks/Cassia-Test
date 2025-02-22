@@ -4,7 +4,7 @@ import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
@@ -53,12 +53,11 @@ def main():
     # --------------------------------------
     # Hyperparameters & Settings
     # --------------------------------------
-    num_epochs = 1000
+    num_epochs = 200
     batch_size = 64
     weight_decay = 5e-4
     learning_rate = 1e-2
     momentum = 0.9 
-    T_0 = 5
 
     # Early stopping parameters
     early_stopping_patience = 20  # Number of epochs to wait without improvement
@@ -131,9 +130,9 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=learning_rate,
                           momentum=momentum, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss()
-    scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=T_0, T_mult=2, eta_min=1e-5)
+    scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-5)
 
-    scaler = GradScaler()
+    #scaler = GradScaler()
     # --------------------------------------
     # Resume Training (if applicable)
     # --------------------------------------
@@ -147,7 +146,7 @@ def main():
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+            #scaler.load_state_dict(checkpoint['scaler_state_dict'])
             start_epoch = checkpoint['epoch']
             best_val_loss = checkpoint.get('best_val_loss', best_val_loss)
             epochs_no_improve = checkpoint.get('epochs_no_improve', 0)
@@ -181,9 +180,11 @@ def main():
             with autocast():
                 outputs = model(images)
                 loss = criterion(outputs, labels)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            #scaler.scale(loss).backward()
+            #scaler.step(optimizer)
+            #scaler.update()
+            loss.backward()
+            optimizer.step()
 
             running_loss += loss.item() * images.size(0)
             _, predicted = torch.max(outputs, 1)
@@ -263,7 +264,7 @@ def main():
                     'model_state_dict': model.module.state_dict(),  # save the underlying model
                     'optimizer_state_dict': optimizer.state_dict(),
                     'scheduler_state_dict': scheduler.state_dict(),
-                    'scaler_state_dict': scaler.state_dict(),
+                    #'scaler_state_dict': scaler.state_dict(),
                     'best_val_loss': best_val_loss,
                     'epochs_no_improve': epochs_no_improve
                 }
