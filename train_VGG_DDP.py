@@ -103,6 +103,9 @@ def main():
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
     val_dataset.dataset.transform = val_transforms
 
+    if rank==0:
+        print(f"Train size: {len(train_dataset)} | Val size: {len(val_dataset)}")
+
     # Create Distributed Samplers for training and validation
     train_sampler = DistributedSampler(train_dataset)
     val_sampler = DistributedSampler(val_dataset, shuffle=False)
