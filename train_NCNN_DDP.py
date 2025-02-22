@@ -80,15 +80,15 @@ def main():
         transforms.RandomHorizontalFlip(),
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5],
-                             std=[0.5, 0.5, 0.5]),
+        transforms.Normalize(mean=[0.52026823, 0.40445255, 0.34655508],
+                             std=[0.28127891, 0.24436931, 0.23583611]),
     ])
 
     val_transforms = transforms.Compose([
         transforms.Resize((120, 120)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5],
-                             std=[0.5, 0.5, 0.5])
+        transforms.Normalize(mean=[0.52026823, 0.40445255, 0.34655508],
+                             std=[0.28127891, 0.24436931, 0.23583611])
     ])
 
     full_dataset = ImageFolder(root=dataset_dir, transform=train_transforms)
