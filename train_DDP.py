@@ -11,6 +11,7 @@ from torchvision.datasets import ImageFolder
 from torchvision import models
 from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
+from NCNN import NCNN
 
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
@@ -22,6 +23,7 @@ def parse_args():
     parser.add_argument('--checkpoint_dir', type=str, default='./checkpoints', help="Directory to save/load checkpoints")
     # local_rank is passed automatically when launching with torchrun or the distributed launcher.
     parser.add_argument("--local_rank", type=int, default=0, help="Local rank for DistributedDataParallel")
+    parser.add_argument("--model", type=str, default="vgg16", help="Model to use for training")
     args = parser.parse_args()
     return args
 
@@ -40,24 +42,24 @@ def main():
     args = parse_args()
     local_rank = int(os.environ.get("LOCAL_RANK", args.local_rank))
     print(local_rank)
+    model_name = args.model
     # Initialize process group for DDP
     torch.cuda.set_device(local_rank)
     dist.init_process_group(backend="nccl")
     rank = dist.get_rank()
     world_size = dist.get_world_size()
 
-    
-
-    torch.manual_seed(1234)
-
     # --------------------------------------
     # Hyperparameters & Settings
     # --------------------------------------
+    torch.manual_seed(1234)
+
     num_epochs = 200
     batch_size = 128
     weight_decay = 5e-4
     learning_rate = 1e-2
     momentum = 0.9 
+    train_split = 0.85
 
     # Early stopping parameters
     early_stopping_patience = 20  # Number of epochs to wait without improvement
@@ -77,8 +79,10 @@ def main():
     # --------------------------------------
     # Data Preparation & Augmentation
     # --------------------------------------
+    img_size = 224 if model_name == "vgg16" else 120
+
     train_transforms = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((img_size, img_size)),
         transforms.RandomHorizontalFlip(),
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
         transforms.ToTensor(),
@@ -87,7 +91,7 @@ def main():
     ])
 
     val_transforms = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.52026823, 0.40445255, 0.34655508],
                              std=[0.28127891, 0.24436931, 0.23583611])
@@ -98,7 +102,7 @@ def main():
     if rank == 0:
         print(f"Number of classes: {num_classes}")
 
-    train_size = int(0.85 * len(full_dataset))
+    train_size = int(train_split * len(full_dataset))
     val_size = len(full_dataset) - train_size
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
     val_dataset.dataset.transform = val_transforms
@@ -119,13 +123,17 @@ def main():
     # --------------------------------------
     # Model Setup
     # --------------------------------------
-    model = models.vgg16(weights=None, dropout=0.5)
-    in_features = model.classifier[6].in_features
-    model.classifier[6] = nn.Linear(in_features, num_classes)
+    if model_name == "vgg16":
+        model = models.vgg16(weights=None, dropout=0.5)
+        in_features = model.classifier[6].in_features
+        model.classifier[6] = nn.Linear(in_features, num_classes)
+    else:
+        model = NCNN()
+        in_features = model.output.in_features
+        model.output = nn.Linear(in_features, num_classes)
 
     model = model.to(device)
     model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
-
 
     # --------------------------------------
     # Optimizer, Loss, Scheduler, and Mixed Precision
@@ -180,9 +188,9 @@ def main():
         for images, labels in loader:
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
-            with autocast():
-                outputs = model(images)
-                loss = criterion(outputs, labels)
+            #with autocast():
+            outputs = model(images)
+            loss = criterion(outputs, labels)
             #scaler.scale(loss).backward()
             #scaler.step(optimizer)
             #scaler.update()

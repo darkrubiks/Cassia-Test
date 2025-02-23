@@ -4,18 +4,20 @@ import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
+from torchvision import models
 from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 from NCNN import NCNN
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train NCNN on CASIA-WebFace with resume and early stopping")
+    parser = argparse.ArgumentParser(description="Train VGG on CASIA-WebFace with resume and early stopping")
     parser.add_argument('--resume', action='store_true', help="Resume training from the latest checkpoint if available")
     parser.add_argument('--checkpoint_dir', type=str, default='./checkpoints', help="Directory to save/load checkpoints")
+    parser.add_argument("--model", type=str, default="vgg16", help="Model to use for training")
     args = parser.parse_args()
     return args
 
@@ -34,16 +36,19 @@ def save_checkpoint(state, checkpoint_dir, filename):
 def main():
     torch.manual_seed(1234)
     args = parse_args()
+    model_name = args.model
 
     # --------------------------------------
     # Hyperparameters & Settings
     # --------------------------------------
-    num_epochs = 1000
+    torch.manual_seed(1234)
+
+    num_epochs = 200
     batch_size = 512
     weight_decay = 5e-4
     learning_rate = 1e-2
     momentum = 0.9 
-    T_0 = 5
+    train_split = 0.85
 
     # Early stopping parameters
     early_stopping_patience = 20  # Number of epochs to wait without improvement
@@ -62,8 +67,10 @@ def main():
     # --------------------------------------
     # Data Preparation & Augmentation
     # --------------------------------------
+    img_size = 224 if model_name == "vgg16" else 120
+
     train_transforms = transforms.Compose([
-        transforms.Resize((120, 120)),
+        transforms.Resize((img_size, img_size)),
         transforms.RandomHorizontalFlip(),
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
         transforms.ToTensor(),
@@ -72,7 +79,7 @@ def main():
     ])
 
     val_transforms = transforms.Compose([
-        transforms.Resize((120, 120)),
+        transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.52026823, 0.40445255, 0.34655508],
                              std=[0.28127891, 0.24436931, 0.23583611])
@@ -82,10 +89,12 @@ def main():
     num_classes = len(full_dataset.classes)
     print(f"Number of classes: {num_classes}")
 
-    train_size = int(0.9 * len(full_dataset))
+    train_size = int(train_split * len(full_dataset))
     val_size = len(full_dataset) - train_size
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
     val_dataset.dataset.transform = val_transforms
+
+    print(f"Train size: {len(train_dataset)} | Val size: {len(val_dataset)}")
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                               num_workers=4, pin_memory=True)
@@ -95,9 +104,14 @@ def main():
     # --------------------------------------
     # Model Setup
     # --------------------------------------
-    model = NCNN()
-    in_features = model.output.in_features
-    model.output = nn.Linear(in_features, num_classes)
+    if model_name == "vgg16":
+        model = models.vgg16(weights=None, dropout=0.5)
+        in_features = model.classifier[6].in_features
+        model.classifier[6] = nn.Linear(in_features, num_classes)
+    else:
+        model = NCNN()
+        in_features = model.output.in_features
+        model.output = nn.Linear(in_features, num_classes)
 
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs")
@@ -110,10 +124,9 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=learning_rate,
                           momentum=momentum, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss()
-    scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=T_0, T_mult=2, eta_min=1e-5)
+    scheduler = CosineAnnealingLR(optimizer, T_max=50, eta_min=1e-5)
 
-    scaler = GradScaler()
-
+    #scaler = GradScaler()
     # --------------------------------------
     # Resume Training (if applicable)
     # --------------------------------------
@@ -127,7 +140,7 @@ def main():
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            scaler.load_state_dict(checkpoint['scaler_state_dict'])
+            #scaler.load_state_dict(checkpoint['scaler_state_dict'])
             start_epoch = checkpoint['epoch']
             best_val_loss = checkpoint.get('best_val_loss', best_val_loss)
             epochs_no_improve = checkpoint.get('epochs_no_improve', 0)
@@ -149,12 +162,14 @@ def main():
         for images, labels in tqdm(train_loader):
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
-            with autocast():
-                outputs = model(images)
-                loss = criterion(outputs, labels)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            #with autocast():
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            #scaler.scale(loss).backward()
+            #scaler.step(optimizer)
+            #scaler.update()
+            loss.backward()
+            optimizer.step()
 
             running_loss += loss.item() * images.size(0)
             _, predicted = torch.max(outputs, 1)
@@ -196,8 +211,7 @@ def main():
               f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | "
               f"LR: {current_lr:.6f} | {batches_per_sec:.2f} batches/s, {images_per_sec:.2f} images/s")
 
-
-        # Early Stopping: Check for improvement in validation loss.
+         # Early Stopping: Check for improvement in validation loss.
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_no_improve = 0
@@ -206,7 +220,7 @@ def main():
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'scheduler_state_dict': scheduler.state_dict(),
-                    'scaler_state_dict': scaler.state_dict(),
+                    #'scaler_state_dict': scaler.state_dict(),
                     'best_val_loss': best_val_loss,
                     'epochs_no_improve': epochs_no_improve
                 }
