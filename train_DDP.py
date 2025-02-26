@@ -24,6 +24,11 @@ def parse_args():
     # local_rank is passed automatically when launching with torchrun or the distributed launcher.
     parser.add_argument("--local_rank", type=int, default=0, help="Local rank for DistributedDataParallel")
     parser.add_argument("--model", type=str, default="vgg16", help="Model to use for training")
+    parser.add_argument("--epochs", type=int, default=200, help="Number of epochs to train")
+    parser.add_argument("--batch_size", type=int, default=128, help="Batch size for training")
+    parser.add_argument("--opt", type=str, default="sgd", help="Optimizer to use for training")
+    parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate for training")
+    parser.add_argument("--wd", type=float, default=5e-4, help="Weight decay for training")
     args = parser.parse_args()
     return args
 
@@ -54,10 +59,10 @@ def main():
     # --------------------------------------
     torch.manual_seed(1234)
 
-    num_epochs = 200
-    batch_size = 128
-    weight_decay = 5e-4
-    learning_rate = 1e-2
+    num_epochs = args.epochs
+    batch_size = args.batch_size
+    weight_decay = args.wd
+    learning_rate = args.lr
     momentum = 0.9 
     train_split = 0.85
 
@@ -124,10 +129,12 @@ def main():
     # Model Setup
     # --------------------------------------
     if model_name == "vgg16":
-        model = models.vgg16(weights=None, dropout=0.5)
-        in_features = model.classifier[6].in_features
-        model.classifier[6] = nn.Linear(in_features, num_classes)
-    else:
+        model = models.vgg16(weights=None, num_classes=num_classes)
+    elif model_name == "resnet50":
+        model = models.resnet50(weights=None, num_classes=num_classes)
+    elif model_name == "vit":
+        model = models.vit_b_16(weights=None, num_classes=num_classes)
+    elif model_name == "ncnn":
         model = NCNN()
         in_features = model.output.in_features
         model.output = nn.Linear(in_features, num_classes)
@@ -138,8 +145,12 @@ def main():
     # --------------------------------------
     # Optimizer, Loss, Scheduler, and Mixed Precision
     # --------------------------------------
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate,
-                          momentum=momentum, weight_decay=weight_decay)
+    if args.opt == "adamw":
+        optimizer = optim.AdamW(model.parameters(), lr=learning_rate,
+                                weight_decay=weight_decay)
+    elif args.opt == "sgd":
+        optimizer = optim.SGD(model.parameters(), lr=learning_rate,
+                            momentum=momentum, weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss()
     scheduler = CosineAnnealingLR(optimizer, T_max=50, eta_min=1e-5)
 
