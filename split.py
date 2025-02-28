@@ -2,6 +2,8 @@ import os
 import shutil
 import random
 
+from tqdm import tqdm
+
 # Paths (Modify these to match your dataset location)
 dataset_path = "casia-webface"
 train_path = "CassiaWebFace\\train"
@@ -15,7 +17,7 @@ os.makedirs(val_path, exist_ok=True)
 train_ratio = 0.9
 
 # Iterate over subject folders
-for subject in os.listdir(dataset_path):
+for subject in tqdm(os.listdir(dataset_path)):
     subject_path = os.path.join(dataset_path, subject)
     
     # Ensure it's a directory
