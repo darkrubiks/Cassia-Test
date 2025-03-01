@@ -6,15 +6,15 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Paths (Modify these to match your dataset location)
 dataset_path = "casia-webface"
-train_path = "CassiaWebFace/train"
-val_path = "CassiaWebFace/val"
+train_path = "CassiaWebFace\\train"
+val_path = "CassiaWebFace\\val"
 
 # Ensure output directories exist
 os.makedirs(train_path, exist_ok=True)
 os.makedirs(val_path, exist_ok=True)
 
 # Set train/val split ratio
-train_ratio = 0.9
+train_ratio = 0.80
 
 # Gather copy tasks using os.scandir for faster directory traversal
 copy_tasks = []  # Each element is a tuple (source_path, destination_path)
