@@ -2,7 +2,7 @@ import os
 import shutil
 import random
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 # Paths (Modify these to match your dataset location)
 dataset_path = "casia-webface"
@@ -55,11 +55,9 @@ def copy_file(task):
     src, dest = task
     shutil.copy(src, dest)
 
-# Use ThreadPoolExecutor with as_completed to update the progress bar as tasks finish
+# Use ThreadPoolExecutor to copy files concurrently
 max_workers = 16  # Adjust the number of threads as needed
 with ThreadPoolExecutor(max_workers=max_workers) as executor:
-    futures = [executor.submit(copy_file, task) for task in copy_tasks]
-    for _ in tqdm(as_completed(futures), total=len(futures), desc="Copying images"):
-        pass
+    list(tqdm(executor.map(copy_file, copy_tasks), total=len(copy_tasks), desc="Copying images"))
 
 print("Dataset split complete!")
