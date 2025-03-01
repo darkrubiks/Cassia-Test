@@ -6,8 +6,8 @@ from tqdm import tqdm
 
 # Paths (Modify these to match your dataset location)
 dataset_path = "casia-webface"
-train_path = "CassiaWebFace\\train"
-val_path = "CassiaWebFace\\val"
+train_path = "CassiaWebFace/train"
+val_path = "CassiaWebFace/val"
 
 # Ensure output directories exist
 os.makedirs(train_path, exist_ok=True)
