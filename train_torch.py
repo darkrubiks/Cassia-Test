@@ -116,11 +116,7 @@ def _get_cache_path(filepath):
 def load_data(traindir, valdir, args):
     # Data loading code
     print("Loading data")
-    val_resize_size, val_crop_size, train_crop_size = (
-        args.val_resize_size,
-        args.val_crop_size,
-        args.train_crop_size,
-    )
+
     interpolation = InterpolationMode(args.interpolation)
 
     print("Loading training data")
@@ -141,7 +137,8 @@ def load_data(traindir, valdir, args):
         dataset = torchvision.datasets.ImageFolder(
             traindir,
             presets.ClassificationPresetTrain(
-                crop_size=train_crop_size,
+                crop_size=args.crop_size,
+                resize_size=args.resize_size,
                 interpolation=interpolation,
                 auto_augment_policy=auto_augment_policy,
                 random_erase_prob=random_erase_prob,
@@ -173,8 +170,8 @@ def load_data(traindir, valdir, args):
 
         else:
             preprocessing = presets.ClassificationPresetEval(
-                crop_size=val_crop_size,
-                resize_size=val_resize_size,
+                crop_size=args.crop_size,
+                resize_size=args.resize_size,
                 interpolation=interpolation,
                 backend=args.backend,
                 use_v2=args.use_v2,
@@ -511,13 +508,10 @@ def get_args_parser(add_help=True):
         "--interpolation", default="bilinear", type=str, help="the interpolation method (default: bilinear)"
     )
     parser.add_argument(
-        "--val-resize-size", default=256, type=int, help="the resize size used for validation (default: 256)"
+        "--resize-size", default=256, type=int, help="the resize size used for validation (default: 256)"
     )
     parser.add_argument(
-        "--val-crop-size", default=224, type=int, help="the central crop size used for validation (default: 224)"
-    )
-    parser.add_argument(
-        "--train-crop-size", default=224, type=int, help="the random crop size used for training (default: 224)"
+        "--crop-size", default=224, type=int, help="the central crop size used for validation (default: 224)"
     )
     parser.add_argument("--clip-grad-norm", default=None, type=float, help="the maximum gradient norm (default None)")
     parser.add_argument("--ra-sampler", action="store_true", help="whether to use Repeated Augmentation in training")
