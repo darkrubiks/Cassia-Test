@@ -22,6 +22,7 @@ class ClassificationPresetTrain:
         self,
         *,
         crop_size,
+        resize_size=256,
         mean=(0.52026823, 0.40445255, 0.34655508), # Changed here
         std=(0.28127891, 0.24436931, 0.23583611),
         interpolation=InterpolationMode.BILINEAR,
@@ -42,7 +43,9 @@ class ClassificationPresetTrain:
         elif backend != "pil":
             raise ValueError(f"backend can be 'tensor' or 'pil', but got {backend}")
 
-        transforms.append(T.RandomResizedCrop(crop_size, interpolation=interpolation, antialias=True))
+        transforms.append(T.Resize(resize_size, interpolation=interpolation, antialias=True))
+        transforms.append(T.CenterCrop(crop_size))
+        #transforms.append(T.RandomResizedCrop(crop_size, interpolation=interpolation, antialias=True))
         if hflip_prob > 0:
             transforms.append(T.RandomHorizontalFlip(hflip_prob))
         if auto_augment_policy is not None:

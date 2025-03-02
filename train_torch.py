@@ -15,6 +15,8 @@ from torch.utils.data.dataloader import default_collate
 from torchvision.transforms.functional import InterpolationMode
 from transforms import get_mixup_cutmix
 
+from NCNN import NCNN
+
 
 def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema=None, scaler=None):
     model.train()
@@ -245,7 +247,12 @@ def main(args):
     )
 
     print("Creating model")
-    model = torchvision.models.get_model(args.model, weights=args.weights, num_classes=num_classes)
+    if args.model == "ncnn":
+        model = NCNN()
+        in_features = model.output.in_features
+        model.output = nn.Linear(in_features, num_classes)
+    else:
+        model = torchvision.models.get_model(args.model, weights=args.weights, num_classes=num_classes)
     model.to(device)
 
     if args.distributed and args.sync_bn:
