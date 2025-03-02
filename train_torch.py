@@ -17,6 +17,7 @@ from transforms import get_mixup_cutmix
 
 from NCNN import NCNN
 
+VAL_LOSS = 0.0
 
 def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema=None, scaler=None):
     model.train()
@@ -100,10 +101,10 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
 
     metric_logger.synchronize_between_processes()
     # CHANGED: Compute average validation loss from the loss meter
-    val_loss = metric_logger.meters["loss"].global_avg  
+    VAL_LOSS = metric_logger.meters["loss"].global_avg  
 
     print(f"{header} Acc@1 {metric_logger.acc1.global_avg:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f}")
-    return val_loss, metric_logger.acc1.global_avg  
+    return metric_logger.acc1.global_avg  
 
 
 def _get_cache_path(filepath):
@@ -379,14 +380,14 @@ def main(args):
             train_sampler.set_epoch(epoch)
         train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema, scaler)
         lr_scheduler.step()
-        val_loss, acc1 = evaluate(model, criterion, data_loader_test, device=device)
+        evaluate(model, criterion, data_loader_test, device=device)
         if model_ema:
             evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
 
         # CHANGED: Early stopping and checkpoint saving logic based on validation loss
         if epoch > args.lr_warmup_epochs:
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            if VAL_LOSS < best_val_loss:
+                best_val_loss = VAL_LOSS
                 epochs_no_improve = 0
                 if args.output_dir:
                     checkpoint = {
@@ -401,7 +402,7 @@ def main(args):
                     if scaler:
                         checkpoint["scaler"] = scaler.state_dict()
                     utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
-                    print(f"Checkpoint saved at epoch {epoch} with val_loss {val_loss:.3f}")
+                    print(f"Checkpoint saved at epoch {epoch} with val_loss {VAL_LOSS:.3f}")
             else:
                 epochs_no_improve += 1
                 print(f"Validation loss did not improve for {epochs_no_improve} epoch(s)")
