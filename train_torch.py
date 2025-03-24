@@ -385,31 +385,31 @@ def main(args):
             evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
 
         # CHANGED: Early stopping and checkpoint saving logic based on validation loss
-        if epoch > args.lr_warmup_epochs:
-            if VAL_LOSS < best_val_loss:
-                best_val_loss = VAL_LOSS
-                epochs_no_improve = 0
-                if args.output_dir:
-                    checkpoint = {
-                        "model": model_without_ddp.state_dict(),
-                        "optimizer": optimizer.state_dict(),
-                        "lr_scheduler": lr_scheduler.state_dict(),
-                        "epoch": epoch,
-                        "args": args,
-                    }
-                    if model_ema:
-                        checkpoint["model_ema"] = model_ema.state_dict()
-                    if scaler:
-                        checkpoint["scaler"] = scaler.state_dict()
-                    utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
-                    print(f"Checkpoint saved at epoch {epoch} with val_loss {VAL_LOSS:.3f}")
-            else:
-                epochs_no_improve += 1
-                print(f"Validation loss did not improve for {epochs_no_improve} epoch(s)")
+        #if epoch > args.lr_warmup_epochs:
+        #    if VAL_LOSS < best_val_loss:
+        #        best_val_loss = VAL_LOSS
+        #        epochs_no_improve = 0
+        if args.output_dir:
+            checkpoint = {
+                "model": model_without_ddp.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "lr_scheduler": lr_scheduler.state_dict(),
+                "epoch": epoch,
+                "args": args,
+            }
+            if model_ema:
+                checkpoint["model_ema"] = model_ema.state_dict()
+            if scaler:
+                checkpoint["scaler"] = scaler.state_dict()
+            utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
+            print(f"Checkpoint saved at epoch {epoch} with val_loss {VAL_LOSS:.3f}")
+        #    else:
+        #        epochs_no_improve += 1
+        #        print(f"Validation loss did not improve for {epochs_no_improve} epoch(s)")
 
-        if epochs_no_improve >= patience:
-            print("Early stopping triggered")
-            break
+        #if epochs_no_improve >= patience:
+        #    print("Early stopping triggered")
+        #    break
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
