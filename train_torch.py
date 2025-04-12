@@ -2,6 +2,7 @@ import datetime
 import os
 import time
 import warnings
+import matplotlib.pyplot as plt   # <-- For plotting
 
 import presets
 import torch
@@ -19,6 +20,8 @@ from NCNN import NCNN
 
 VAL_LOSS = 0.0
 
+# ------------------------------------------------------------------
+# Modified: Now return both training loss and top-1 training accuracy for the epoch
 def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema=None, scaler=None):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -37,7 +40,6 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
         if scaler is not None:
             scaler.scale(loss).backward()
             if args.clip_grad_norm is not None:
-                # we should unscale the gradients of optimizer's assigned params if do gradient clipping
                 scaler.unscale_(optimizer)
                 nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
             scaler.step(optimizer)
@@ -51,7 +53,6 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
         if model_ema and i % args.model_ema_steps == 0:
             model_ema.update_parameters(model)
             if epoch < args.lr_warmup_epochs:
-                # Reset ema buffer to keep copying weights during warmup period
                 model_ema.n_averaged.fill_(0)
 
         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
@@ -60,8 +61,14 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
         metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
         metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
         metric_logger.meters["img/s"].update(batch_size / (time.time() - start_time))
+    
+    # Compute average training loss and training accuracy (acc1)
+    train_loss = metric_logger.meters["loss"].global_avg  
+    train_acc = metric_logger.meters["acc1"].global_avg
+    return train_loss, train_acc  
 
-
+# ------------------------------------------------------------------
+# Modified: Return both validation (test) accuracy and loss
 def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix=""):
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -76,14 +83,11 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
             loss = criterion(output, target)
 
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
-            # FIXME need to take into account that the datasets
-            # could have been padded in distributed setup
             batch_size = image.shape[0]
             metric_logger.update(loss=loss.item())
             metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
             metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
             num_processed_samples += batch_size
-    # gather the stats from all processes
 
     num_processed_samples = utils.reduce_across_processes(num_processed_samples)
     if (
@@ -91,7 +95,6 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
         and len(data_loader.dataset) != num_processed_samples
         and torch.distributed.get_rank() == 0
     ):
-        # See FIXME above
         warnings.warn(
             f"It looks like the dataset has {len(data_loader.dataset)} samples, but {num_processed_samples} "
             "samples were used for the validation, which might bias the results. "
@@ -100,39 +103,31 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
         )
 
     metric_logger.synchronize_between_processes()
-    # CHANGED: Compute average validation loss from the loss meter
-    VAL_LOSS = metric_logger.meters["loss"].global_avg  
+    val_loss = metric_logger.meters["loss"].global_avg  
+    test_acc = metric_logger.acc1.global_avg  
 
-    print(f"{header} Acc@1 {metric_logger.acc1.global_avg:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f}")
-    return metric_logger.acc1.global_avg  
+    print(f"{header} Acc@1 {test_acc:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f} Loss {val_loss:.3f}")
+    return test_acc, val_loss  
 
-
+# ------------------------------------------------------------------
 def _get_cache_path(filepath):
     import hashlib
-
     h = hashlib.sha1(filepath.encode()).hexdigest()
     cache_path = os.path.join("~", ".torch", "vision", "datasets", "imagefolder", h[:10] + ".pt")
     cache_path = os.path.expanduser(cache_path)
     return cache_path
 
-
 def load_data(traindir, valdir, args):
-    # Data loading code
     print("Loading data")
-
     interpolation = InterpolationMode(args.interpolation)
 
     print("Loading training data")
     st = time.time()
     cache_path = _get_cache_path(traindir)
     if args.cache_dataset and os.path.exists(cache_path):
-        # Attention, as the transforms are also cached!
         print(f"Loading dataset_train from {cache_path}")
-        # TODO: this could probably be weights_only=True
         dataset, _ = torch.load(cache_path, weights_only=False)
     else:
-        # We need a default value for the variables below because args may come
-        # from train_quantization.py which doesn't define them.
         auto_augment_policy = getattr(args, "auto_augment", None)
         random_erase_prob = getattr(args, "random_erase", 0.0)
         ra_magnitude = getattr(args, "ra_magnitude", None)
@@ -160,9 +155,7 @@ def load_data(traindir, valdir, args):
     print("Loading validation data")
     cache_path = _get_cache_path(valdir)
     if args.cache_dataset and os.path.exists(cache_path):
-        # Attention, as the transforms are also cached!
         print(f"Loading dataset_test from {cache_path}")
-        # TODO: this could probably be weights_only=True
         dataset_test, _ = torch.load(cache_path, weights_only=False)
     else:
         if args.weights and args.test_only:
@@ -170,7 +163,6 @@ def load_data(traindir, valdir, args):
             preprocessing = weights.transforms(antialias=True)
             if args.backend == "tensor":
                 preprocessing = torchvision.transforms.Compose([torchvision.transforms.PILToTensor(), preprocessing])
-
         else:
             preprocessing = presets.ClassificationPresetEval(
                 crop_size=args.crop_size,
@@ -202,7 +194,6 @@ def load_data(traindir, valdir, args):
 
     return dataset, dataset_test, train_sampler, test_sampler
 
-
 def main(args):
     if args.output_dir:
         utils.mkdir(args.output_dir)
@@ -211,7 +202,6 @@ def main(args):
     print(args)
 
     device = torch.device(args.device)
-
     if args.use_deterministic_algorithms:
         torch.backends.cudnn.benchmark = False
         torch.use_deterministic_algorithms(True)
@@ -227,10 +217,8 @@ def main(args):
         mixup_alpha=args.mixup_alpha, cutmix_alpha=args.cutmix_alpha, num_classes=num_classes, use_v2=args.use_v2
     )
     if mixup_cutmix is not None:
-
         def collate_fn(batch):
             return mixup_cutmix(*default_collate(batch))
-
     else:
         collate_fn = default_collate
 
@@ -304,8 +292,7 @@ def main(args):
         main_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.lr_gamma)
     else:
         raise RuntimeError(
-            f"Invalid lr scheduler '{args.lr_scheduler}'. Only StepLR, CosineAnnealingLR and ExponentialLR "
-            "are supported."
+            f"Invalid lr scheduler '{args.lr_scheduler}'. Only StepLR, CosineAnnealingLR and ExponentialLR are supported."
         )
 
     if args.lr_warmup_epochs > 0:
@@ -334,19 +321,13 @@ def main(args):
 
     model_ema = None
     if args.model_ema:
-        # Decay adjustment that aims to keep the decay independent of other hyper-parameters originally proposed at:
-        # https://github.com/facebookresearch/pycls/blob/f8cd9627/pycls/core/net.py#L123
-        #
-        # total_ema_updates = (Dataset_size / n_GPUs) * epochs / (batch_size_per_gpu * EMA_steps)
-        # We consider constant = Dataset_size for a given dataset/setup and omit it. Thus:
-        # adjust = 1 / total_ema_updates ~= n_GPUs * batch_size_per_gpu * EMA_steps / epochs
         adjust = args.world_size * args.batch_size * args.model_ema_steps / args.epochs
         alpha = 1.0 - args.model_ema_decay
         alpha = min(1.0, alpha * adjust)
         model_ema = utils.ExponentialMovingAverage(model_without_ddp, device=device, decay=1.0 - alpha)
 
     if args.resume:
-        checkpoint = torch.load(args.resume, map_location="cpu", weights_only=True)
+        checkpoint = torch.load(args.resume, map_location="cpu", weights_only=False)
         model_without_ddp.load_state_dict(checkpoint["model"])
         if not args.test_only:
             optimizer.load_state_dict(checkpoint["optimizer"])
@@ -358,7 +339,6 @@ def main(args):
             scaler.load_state_dict(checkpoint["scaler"])
 
     if args.test_only:
-        # We disable the cudnn benchmarking because it can noticeably affect the accuracy
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
         if model_ema:
@@ -370,7 +350,32 @@ def main(args):
     print("Start training")
     start_time = time.time()
 
-    # CHANGED: Initialize early stopping variables
+    # ------------------------------------------------------------------
+    # Initialize live plotting using interactive mode and two subplots:
+    plt.ion()   # Turn on interactive mode
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    # Subplot for Losses
+    train_loss_line, = ax1.plot([], [], label="Training Loss", color="blue")
+    val_loss_line,   = ax1.plot([], [], label="Validation Loss", color="red")
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("Loss")
+    ax1.set_title("Loss")
+    ax1.legend()
+    # Subplot for Accuracies
+    train_acc_line, = ax2.plot([], [], label="Training Accuracy", color="blue")
+    test_acc_line,  = ax2.plot([], [], label="Validation Accuracy", color="red")
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("Accuracy")
+    ax2.set_title("Accuracy")
+    ax2.legend()
+    # ------------------------------------------------------------------
+
+    # Initialize lists for live plotting
+    train_losses = []
+    val_losses = []
+    train_accs = []
+    test_accs = []
+
     best_val_loss = float("inf")
     epochs_no_improve = 0
     patience = args.patience
@@ -378,12 +383,18 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema, scaler)
+        # Training step: capture training loss and accuracy for this epoch
+        train_loss, train_acc = train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema, scaler)
+        train_losses.append(train_loss)
+        train_accs.append(train_acc)
         lr_scheduler.step()
-        evaluate(model, criterion, data_loader_test, device=device)
+        # Evaluation step: obtain validation (test) accuracy and loss
+        test_acc, val_loss = evaluate(model, criterion, data_loader_test, device=device)
+        val_losses.append(val_loss)
+        test_accs.append(test_acc)
+
         if model_ema:
             evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
-
         # CHANGED: Early stopping and checkpoint saving logic based on validation loss
         #if epoch > args.lr_warmup_epochs:
         #    if VAL_LOSS < best_val_loss:
@@ -402,7 +413,7 @@ def main(args):
             if scaler:
                 checkpoint["scaler"] = scaler.state_dict()
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
-            print(f"Checkpoint saved at epoch {epoch} with val_loss {VAL_LOSS:.3f}")
+            print(f"Checkpoint saved at epoch {epoch} with val_loss {val_loss:.3f}")
         #    else:
         #        epochs_no_improve += 1
         #        print(f"Validation loss did not improve for {epochs_no_improve} epoch(s)")
@@ -410,17 +421,35 @@ def main(args):
         #if epochs_no_improve >= patience:
         #    print("Early stopping triggered")
         #    break
+        # ------------------------------------------------------------------
+        # Live plot update: update both subplots with new data
+        current_epochs = list(range(args.start_epoch, epoch + 1))
+        # Update Loss plot
+        train_loss_line.set_data(current_epochs, train_losses)
+        val_loss_line.set_data(current_epochs, val_losses)
+        ax1.relim()
+        ax1.autoscale_view()
+        # Update Accuracy plot
+        train_acc_line.set_data(current_epochs, train_accs)
+        test_acc_line.set_data(current_epochs, test_accs)
+        ax2.relim()
+        ax2.autoscale_view()
+        plt.draw()
+        plt.pause(0.001)
+        # ------------------------------------------------------------------
+
+    # Turn off interactive mode and display final plot
+    plt.ioff()
+    plt.savefig("training_plot.png")  # Save the plot as an image
+    plt.show()
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(f"Training time {total_time_str}")
 
-
 def get_args_parser(add_help=True):
     import argparse
-
     parser = argparse.ArgumentParser(description="PyTorch Classification Training", add_help=add_help)
-
     parser.add_argument("--data-path", default="/datasets01/imagenet_full_size/061417/", type=str, help="dataset path")
     parser.add_argument("--model", default="resnet18", type=str, help="model name")
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
@@ -443,34 +472,15 @@ def get_args_parser(add_help=True):
         help="weight decay (default: 1e-4)",
         dest="weight_decay",
     )
-    parser.add_argument(
-        "--norm-weight-decay",
-        default=None,
-        type=float,
-        help="weight decay for Normalization layers (default: None, same value as --wd)",
-    )
-    parser.add_argument(
-        "--bias-weight-decay",
-        default=None,
-        type=float,
-        help="weight decay for bias parameters of all layers (default: None, same value as --wd)",
-    )
-    parser.add_argument(
-        "--transformer-embedding-decay",
-        default=None,
-        type=float,
-        help="weight decay for embedding parameters for vision transformer models (default: None, same value as --wd)",
-    )
-    parser.add_argument(
-        "--label-smoothing", default=0.0, type=float, help="label smoothing (default: 0.0)", dest="label_smoothing"
-    )
+    parser.add_argument("--norm-weight-decay", default=None, type=float, help="weight decay for Normalization layers (default: None, same value as --wd)")
+    parser.add_argument("--bias-weight-decay", default=None, type=float, help="weight decay for bias parameters of all layers (default: None, same value as --wd)")
+    parser.add_argument("--transformer-embedding-decay", default=None, type=float, help="weight decay for embedding parameters for vision transformer models (default: None, same value as --wd)")
+    parser.add_argument("--label-smoothing", default=0.0, type=float, help="label smoothing (default: 0.0)", dest="label_smoothing")
     parser.add_argument("--mixup-alpha", default=0.0, type=float, help="mixup alpha (default: 0.0)")
     parser.add_argument("--cutmix-alpha", default=0.0, type=float, help="cutmix alpha (default: 0.0)")
     parser.add_argument("--lr-scheduler", default="steplr", type=str, help="the lr scheduler (default: steplr)")
     parser.add_argument("--lr-warmup-epochs", default=0, type=int, help="the number of epochs to warmup (default: 0)")
-    parser.add_argument(
-        "--lr-warmup-method", default="constant", type=str, help="the warmup method (default: constant)"
-    )
+    parser.add_argument("--lr-warmup-method", default="constant", type=str, help="the warmup method (default: constant)")
     parser.add_argument("--lr-warmup-decay", default=0.01, type=float, help="the decay for lr")
     parser.add_argument("--lr-step-size", default=30, type=int, help="decrease lr every step-size epochs")
     parser.add_argument("--lr-gamma", default=0.1, type=float, help="decrease lr by a factor of lr-gamma")
@@ -480,72 +490,30 @@ def get_args_parser(add_help=True):
     parser.add_argument("--output-dir", default=".", type=str, help="path to save outputs")
     parser.add_argument("--resume", default="", type=str, help="path of checkpoint")
     parser.add_argument("--start-epoch", default=0, type=int, metavar="N", help="start epoch")
-    parser.add_argument(
-        "--cache-dataset",
-        dest="cache_dataset",
-        help="Cache the datasets for quicker initialization. It also serializes the transforms",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--sync-bn",
-        dest="sync_bn",
-        help="Use sync batch norm",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--test-only",
-        dest="test_only",
-        help="Only test the model",
-        action="store_true",
-    )
+    parser.add_argument("--cache-dataset", dest="cache_dataset", help="Cache the datasets for quicker initialization. It also serializes the transforms", action="store_true")
+    parser.add_argument("--sync-bn", dest="sync_bn", help="Use sync batch norm", action="store_true")
+    parser.add_argument("--test-only", dest="test_only", help="Only test the model", action="store_true")
     parser.add_argument("--auto-augment", default=None, type=str, help="auto augment policy (default: None)")
     parser.add_argument("--ra-magnitude", default=9, type=int, help="magnitude of auto augment policy")
     parser.add_argument("--augmix-severity", default=3, type=int, help="severity of augmix policy")
     parser.add_argument("--random-erase", default=0.0, type=float, help="random erasing probability (default: 0.0)")
-
-    # Mixed precision training parameters
     parser.add_argument("--amp", action="store_true", help="Use torch.cuda.amp for mixed precision training")
-
-    # distributed training parameters
     parser.add_argument("--world-size", default=1, type=int, help="number of distributed processes")
     parser.add_argument("--dist-url", default="env://", type=str, help="url used to set up distributed training")
-    parser.add_argument(
-        "--model-ema", action="store_true", help="enable tracking Exponential Moving Average of model parameters"
-    )
-    parser.add_argument(
-        "--model-ema-steps",
-        type=int,
-        default=32,
-        help="the number of iterations that controls how often to update the EMA model (default: 32)",
-    )
-    parser.add_argument(
-        "--model-ema-decay",
-        type=float,
-        default=0.99998,
-        help="decay factor for Exponential Moving Average of model parameters (default: 0.99998)",
-    )
-    parser.add_argument(
-        "--use-deterministic-algorithms", action="store_true", help="Forces the use of deterministic algorithms only."
-    )
-    parser.add_argument(
-        "--interpolation", default="bilinear", type=str, help="the interpolation method (default: bilinear)"
-    )
-    parser.add_argument(
-        "--resize-size", default=256, type=int, help="the resize size used for validation (default: 256)"
-    )
-    parser.add_argument(
-        "--crop-size", default=224, type=int, help="the central crop size used for validation (default: 224)"
-    )
+    parser.add_argument("--model-ema", action="store_true", help="enable tracking Exponential Moving Average of model parameters")
+    parser.add_argument("--model-ema-steps", type=int, default=32, help="the number of iterations that controls how often to update the EMA model (default: 32)")
+    parser.add_argument("--model-ema-decay", type=float, default=0.99998, help="decay factor for Exponential Moving Average of model parameters (default: 0.99998)")
+    parser.add_argument("--use-deterministic-algorithms", action="store_true", help="Forces the use of deterministic algorithms only.")
+    parser.add_argument("--interpolation", default="bilinear", type=str, help="the interpolation method (default: bilinear)")
+    parser.add_argument("--resize-size", default=256, type=int, help="the resize size used for validation (default: 256)")
+    parser.add_argument("--crop-size", default=224, type=int, help="the central crop size used for validation (default: 224)")
     parser.add_argument("--clip-grad-norm", default=None, type=float, help="the maximum gradient norm (default None)")
     parser.add_argument("--ra-sampler", action="store_true", help="whether to use Repeated Augmentation in training")
-    parser.add_argument(
-        "--ra-reps", default=3, type=int, help="number of repetitions for Repeated Augmentation (default: 3)"
-    )
+    parser.add_argument("--ra-reps", default=3, type=int, help="number of repetitions for Repeated Augmentation (default: 3)")
     parser.add_argument("--weights", default=None, type=str, help="the weights enum name to load")
     parser.add_argument("--backend", default="PIL", type=str.lower, help="PIL or tensor - case insensitive")
     parser.add_argument("--use-v2", action="store_true", help="Use V2 transforms")
     return parser
-
 
 if __name__ == "__main__":
     args = get_args_parser().parse_args()
