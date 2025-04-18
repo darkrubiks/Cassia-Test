@@ -1,4 +1,5 @@
 import datetime
+import csv
 import os
 import time
 import warnings
@@ -350,6 +351,22 @@ def main(args):
     print("Start training")
     start_time = time.time()
 
+    # determine CSV path
+    csv_path = os.path.join(args.output_dir, "metrics.csv")
+    #os.makedirs(args.output_dir, exist_ok=True)
+
+    # decide whether to append or overwrite
+    is_resuming = bool(args.resume) or args.start_epoch > 0
+    mode = "a" if is_resuming and os.path.exists(csv_path) else "w"
+
+    # open once here
+    csv_file = open(csv_path, mode, newline="")
+    csv_writer = csv.writer(csv_file)
+
+    # only write header if starting fresh
+    if mode == "w":
+        csv_writer.writerow(["epoch", "train_loss", "train_acc", "val_loss", "test_acc"])
+
     # ------------------------------------------------------------------
     # Initialize live plotting using interactive mode and two subplots:
     plt.ion()   # Turn on interactive mode
@@ -412,7 +429,7 @@ def main(args):
                 checkpoint["model_ema"] = model_ema.state_dict()
             if scaler:
                 checkpoint["scaler"] = scaler.state_dict()
-            utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
+            utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"checkpoint_{epoch}.pth"))
             print(f"Checkpoint saved at epoch {epoch} with val_loss {val_loss:.3f}")
         #    else:
         #        epochs_no_improve += 1
@@ -435,7 +452,11 @@ def main(args):
         ax2.relim()
         ax2.autoscale_view()
         plt.draw()
-        plt.pause(0.001)
+        plt.pause(0.01)
+        
+        # log to CSV
+        csv_writer.writerow([epoch, train_loss, train_acc, val_loss, test_acc])
+        csv_file.flush()
         # ------------------------------------------------------------------
 
     # Turn off interactive mode and display final plot
