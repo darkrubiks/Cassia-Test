@@ -202,6 +202,12 @@ def main(args):
     utils.init_distributed_mode(args)
     print(args)
 
+    is_distributed = args.distributed
+    rank = torch.distributed.get_rank() if is_distributed else 0
+
+    # decide whether we (this process) should write metrics
+    do_write = (rank == 0)
+
     device = torch.device(args.device)
     if args.use_deterministic_algorithms:
         torch.backends.cudnn.benchmark = False
@@ -351,21 +357,15 @@ def main(args):
     print("Start training")
     start_time = time.time()
 
-    # determine CSV path
-    csv_path = os.path.join(args.output_dir, "metrics.csv")
-    #os.makedirs(args.output_dir, exist_ok=True)
-
-    # decide whether to append or overwrite
-    is_resuming = bool(args.resume) or args.start_epoch > 0
-    mode = "a" if is_resuming and os.path.exists(csv_path) else "w"
-
-    # open once here
-    csv_file = open(csv_path, mode, newline="")
-    csv_writer = csv.writer(csv_file)
-
-    # only write header if starting fresh
-    if mode == "w":
-        csv_writer.writerow(["epoch", "train_loss", "train_acc", "val_loss", "test_acc"])
+    if do_write:
+         # decide whether to append or overwrite
+        is_resuming = bool(args.resume) or args.start_epoch > 0
+        csv_path = os.path.join(args.output_dir, "metrics.csv")
+        mode = "a" if is_resuming and os.path.exists(csv_path) else "w"
+        csv_file = open(csv_path, mode, newline="")
+        csv_writer = csv.writer(csv_file)
+        if mode == "w":
+            csv_writer.writerow(["epoch", "train_loss", "train_acc", "val_loss", "test_acc"])
 
     # ------------------------------------------------------------------
     # Initialize live plotting using interactive mode and two subplots:
@@ -454,15 +454,18 @@ def main(args):
         plt.draw()
         plt.pause(0.01)
         
-        # log to CSV
-        csv_writer.writerow([epoch, train_loss, train_acc, val_loss, test_acc])
-        csv_file.flush()
+        if do_write:
+            csv_writer.writerow([epoch, train_loss, train_acc, val_loss, test_acc])
+            csv_file.flush()
         # ------------------------------------------------------------------
 
     # Turn off interactive mode and display final plot
     plt.ioff()
     plt.savefig("training_plot.png")  # Save the plot as an image
     plt.show()
+
+    if do_write:
+        csv_file.close()
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
