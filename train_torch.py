@@ -420,10 +420,10 @@ def main(args):
         if args.output_dir:
             checkpoint = {
                 "model": model_without_ddp.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "lr_scheduler": lr_scheduler.state_dict(),
-                "epoch": epoch,
-                "args": args,
+                #"optimizer": optimizer.state_dict(),
+                #"lr_scheduler": lr_scheduler.state_dict(),
+                #"epoch": epoch,
+                #"args": args,
             }
             if model_ema:
                 checkpoint["model_ema"] = model_ema.state_dict()
