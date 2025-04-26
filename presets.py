@@ -23,8 +23,8 @@ class ClassificationPresetTrain:
         *,
         crop_size,
         resize_size=256,
-        mean=(0.52026823, 0.40445255, 0.34655508), # Changed here
-        std=(0.28127891, 0.24436931, 0.23583611),
+        mean=(0.520, 0.404, 0.346), # Changed here
+        std=(0.281, 0.244, 0.235),
         interpolation=InterpolationMode.BILINEAR,
         hflip_prob=0.5,
         auto_augment_policy=None,
@@ -44,8 +44,8 @@ class ClassificationPresetTrain:
             raise ValueError(f"backend can be 'tensor' or 'pil', but got {backend}")
 
         transforms.append(T.Resize(resize_size, interpolation=interpolation, antialias=True))
-        transforms.append(T.CenterCrop(crop_size))
-        #transforms.append(T.RandomResizedCrop(crop_size, interpolation=interpolation, antialias=True))
+        #transforms.append(T.CenterCrop(crop_size))
+        transforms.append(T.RandomResizedCrop(crop_size, interpolation=interpolation, antialias=True))
         if hflip_prob > 0:
             transforms.append(T.RandomHorizontalFlip(hflip_prob))
         if auto_augment_policy is not None:
@@ -86,8 +86,8 @@ class ClassificationPresetEval:
         *,
         crop_size,
         resize_size=256,
-        mean=(0.52026823, 0.40445255, 0.34655508), # Changed here
-        std=(0.28127891, 0.24436931, 0.23583611),
+        mean=(0.520, 0.404, 0.346), # Changed here
+        std=(0.281, 0.244, 0.235),
         interpolation=InterpolationMode.BILINEAR,
         backend="pil",
         use_v2=False,
