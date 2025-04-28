@@ -44,8 +44,8 @@ class ClassificationPresetTrain:
             raise ValueError(f"backend can be 'tensor' or 'pil', but got {backend}")
 
         transforms.append(T.Resize(resize_size, interpolation=interpolation, antialias=True))
-        #transforms.append(T.CenterCrop(crop_size))
-        transforms.append(T.RandomResizedCrop(crop_size, interpolation=interpolation, antialias=True))
+        transforms.append(T.CenterCrop(crop_size))
+        #transforms.append(T.RandomResizedCrop(crop_size, interpolation=interpolation, antialias=True))
         if hflip_prob > 0:
             transforms.append(T.RandomHorizontalFlip(hflip_prob))
         if auto_augment_policy is not None:
