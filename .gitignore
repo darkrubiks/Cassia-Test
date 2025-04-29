@@ -1,5 +1,6 @@
 casia-webface/
 CassiaWebFace/
+ms1m-retinaface/
 checkpoints*/
 __pycache__/
 *.zip
