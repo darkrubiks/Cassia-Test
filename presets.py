@@ -46,7 +46,7 @@ class ClassificationPresetTrain:
         transforms.append(T.Resize(resize_size, interpolation=interpolation, antialias=True))
         #transforms.append(T.CenterCrop(crop_size))
         transforms.append(T.RandomCrop(crop_size))
-        transforms.append(T.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1))
+        transforms.append(T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.05))
         if hflip_prob > 0:
             transforms.append(T.RandomHorizontalFlip(hflip_prob))
         if auto_augment_policy is not None:

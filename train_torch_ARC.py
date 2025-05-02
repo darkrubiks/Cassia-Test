@@ -18,6 +18,7 @@ from torchvision.transforms.functional import InterpolationMode
 from transforms import get_mixup_cutmix
 
 from NCNN import NCNN
+from ArcFace import *
 
 VAL_LOSS = 0.0
 
@@ -34,7 +35,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
         start_time = time.time()
         image, target = image.to(device), target.to(device)
         with torch.cuda.amp.autocast(enabled=scaler is not None):
-            output = model(image)
+            output = model(image, target)
             loss = criterion(output, target)
 
         optimizer.zero_grad()
@@ -243,9 +244,15 @@ def main(args):
 
     print("Creating model")
     if args.model == "ncnn":
-        model = NCNN(num_classes=num_classes)
+        model = NCNN()
+        classifier = CosineClassifier(512, 10572)
+        arcface = ArcFace()
+        model = FaceModel(backbone, classifier, arcface)
+        #in_features = model.output.in_features
+        #model.output = nn.Linear(in_features, num_classes)
     else:
         model = torchvision.models.get_model(args.model, weights=args.weights, num_classes=num_classes)
+
     model.to(device)
 
     if args.distributed and args.sync_bn:
@@ -418,10 +425,10 @@ def main(args):
         if args.output_dir:
             checkpoint = {
                 "model": model_without_ddp.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "lr_scheduler": lr_scheduler.state_dict(),
-                "epoch": epoch,
-                "args": args,
+                #"optimizer": optimizer.state_dict(),
+                #"lr_scheduler": lr_scheduler.state_dict(),
+                #"epoch": epoch,
+                #"args": args,
             }
             if model_ema:
                 checkpoint["model_ema"] = model_ema.state_dict()
