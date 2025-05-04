@@ -70,48 +70,6 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
     return train_loss, train_acc  
 
 # ------------------------------------------------------------------
-# Modified: Return both validation (test) accuracy and loss
-def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix=""):
-    model.eval()
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    header = f"Test: {log_suffix}"
-
-    num_processed_samples = 0
-    with torch.inference_mode():
-        for image, target in metric_logger.log_every(data_loader, print_freq, header):
-            image = image.to(device, non_blocking=True)
-            target = target.to(device, non_blocking=True)
-            output = model(image)
-            loss = criterion(output, target)
-
-            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
-            batch_size = image.shape[0]
-            metric_logger.update(loss=loss.item())
-            metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
-            metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
-            num_processed_samples += batch_size
-
-    num_processed_samples = utils.reduce_across_processes(num_processed_samples)
-    if (
-        hasattr(data_loader.dataset, "__len__")
-        and len(data_loader.dataset) != num_processed_samples
-        and torch.distributed.get_rank() == 0
-    ):
-        warnings.warn(
-            f"It looks like the dataset has {len(data_loader.dataset)} samples, but {num_processed_samples} "
-            "samples were used for the validation, which might bias the results. "
-            "Try adjusting the batch size and / or the world size. "
-            "Setting the world size to 1 is always a safe bet."
-        )
-
-    metric_logger.synchronize_between_processes()
-    val_loss = metric_logger.meters["loss"].global_avg  
-    test_acc = metric_logger.acc1.global_avg  
-
-    print(f"{header} Acc@1 {test_acc:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f} Loss {val_loss:.3f}")
-    return test_acc, val_loss  
-
-# ------------------------------------------------------------------
 def _get_cache_path(filepath):
     import hashlib
     h = hashlib.sha1(filepath.encode()).hexdigest()
@@ -119,7 +77,7 @@ def _get_cache_path(filepath):
     cache_path = os.path.expanduser(cache_path)
     return cache_path
 
-def load_data(traindir, valdir, args):
+def load_data(traindir, args):
     print("Loading data")
     interpolation = InterpolationMode(args.interpolation)
 
@@ -146,6 +104,8 @@ def load_data(traindir, valdir, args):
                 augmix_severity=augmix_severity,
                 backend=args.backend,
                 use_v2=args.use_v2,
+                mean=(0.5, 0.5, 0.5), # Changed here
+                std=(0.5, 0.5, 0.5),
             ),
         )
         if args.cache_dataset:
@@ -154,52 +114,20 @@ def load_data(traindir, valdir, args):
             utils.save_on_master((dataset, traindir), cache_path)
     print("Took", time.time() - st)
 
-    print("Loading validation data")
-    cache_path = _get_cache_path(valdir)
-    if args.cache_dataset and os.path.exists(cache_path):
-        print(f"Loading dataset_test from {cache_path}")
-        dataset_test, _ = torch.load(cache_path, weights_only=False)
-    else:
-        if args.weights and args.test_only:
-            weights = torchvision.models.get_weight(args.weights)
-            preprocessing = weights.transforms(antialias=True)
-            if args.backend == "tensor":
-                preprocessing = torchvision.transforms.Compose([torchvision.transforms.PILToTensor(), preprocessing])
-        else:
-            preprocessing = presets.ClassificationPresetEval(
-                crop_size=args.crop_size,
-                resize_size=args.resize_size,
-                interpolation=interpolation,
-                backend=args.backend,
-                use_v2=args.use_v2,
-            )
-
-        dataset_test = torchvision.datasets.ImageFolder(
-            valdir,
-            preprocessing,
-        )
-        if args.cache_dataset:
-            print(f"Saving dataset_test to {cache_path}")
-            utils.mkdir(os.path.dirname(cache_path))
-            utils.save_on_master((dataset_test, valdir), cache_path)
-
     print("Creating data loaders")
     if args.distributed:
         if hasattr(args, "ra_sampler") and args.ra_sampler:
             train_sampler = RASampler(dataset, shuffle=True, repetitions=args.ra_reps)
         else:
             train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
-        test_sampler = torch.utils.data.distributed.DistributedSampler(dataset_test, shuffle=False)
     else:
         train_sampler = torch.utils.data.RandomSampler(dataset)
-        test_sampler = torch.utils.data.SequentialSampler(dataset_test)
 
-    return dataset, dataset_test, train_sampler, test_sampler
+    return dataset, train_sampler
 
 def main(args):
     if args.output_dir:
         utils.mkdir(args.output_dir)
-
     utils.init_distributed_mode(args)
     print(args)
 
@@ -216,9 +144,8 @@ def main(args):
     else:
         torch.backends.cudnn.benchmark = True
 
-    train_dir = os.path.join(args.data_path, "train")
-    val_dir = os.path.join(args.data_path, "val")
-    dataset, dataset_test, train_sampler, test_sampler = load_data(train_dir, val_dir, args)
+    train_dir = os.path.join(args.data_path, "ms1m-retinaface-images")
+    dataset, train_sampler = load_data(train_dir, args)
 
     num_classes = len(dataset.classes)
     mixup_cutmix = get_mixup_cutmix(
@@ -238,18 +165,13 @@ def main(args):
         pin_memory=True,
         collate_fn=collate_fn,
     )
-    data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=args.batch_size, sampler=test_sampler, num_workers=args.workers, pin_memory=True
-    )
 
     print("Creating model")
     if args.model == "ncnn":
-        model = NCNN()
-        classifier = CosineClassifier(512, 10572)
-        arcface = ArcFace()
+        backbone = NCNN()
+        classifier = CosineClassifier(512, num_classes)
+        arcface = CosFace()
         model = FaceModel(backbone, classifier, arcface)
-        #in_features = model.output.in_features
-        #model.output = nn.Linear(in_features, num_classes)
     else:
         model = torchvision.models.get_model(args.model, weights=args.weights, num_classes=num_classes)
 
@@ -353,10 +275,6 @@ def main(args):
     if args.test_only:
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
-        if model_ema:
-            evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
-        else:
-            evaluate(model, criterion, data_loader_test, device=device)
         return
 
     print("Start training")
@@ -411,12 +329,7 @@ def main(args):
         train_accs.append(train_acc)
         lr_scheduler.step()
         # Evaluation step: obtain validation (test) accuracy and loss
-        test_acc, val_loss = evaluate(model, criterion, data_loader_test, device=device)
-        val_losses.append(val_loss)
-        test_accs.append(test_acc)
 
-        if model_ema:
-            evaluate(model_ema, criterion, data_loader_test, device=device, log_suffix="EMA")
         # CHANGED: Early stopping and checkpoint saving logic based on validation loss
         #if epoch > args.lr_warmup_epochs:
         #    if VAL_LOSS < best_val_loss:
@@ -425,17 +338,17 @@ def main(args):
         if args.output_dir:
             checkpoint = {
                 "model": model_without_ddp.state_dict(),
-                #"optimizer": optimizer.state_dict(),
-                #"lr_scheduler": lr_scheduler.state_dict(),
-                #"epoch": epoch,
-                #"args": args,
+                "optimizer": optimizer.state_dict(),
+                "lr_scheduler": lr_scheduler.state_dict(),
+                "epoch": epoch,
+                "args": args,
             }
             if model_ema:
                 checkpoint["model_ema"] = model_ema.state_dict()
             if scaler:
                 checkpoint["scaler"] = scaler.state_dict()
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"checkpoint_{epoch}.pth"))
-            print(f"Checkpoint saved at epoch {epoch} with val_loss {val_loss:.3f}")
+            print(f"Checkpoint saved at epoch {epoch} with loss {train_loss:.3f}")
         #    else:
         #        epochs_no_improve += 1
         #        print(f"Validation loss did not improve for {epochs_no_improve} epoch(s)")
@@ -460,7 +373,7 @@ def main(args):
         plt.pause(0.01)
         
         if do_write:
-            csv_writer.writerow([epoch, train_loss, train_acc, val_loss, test_acc])
+            csv_writer.writerow([epoch, train_loss, train_acc])
             csv_file.flush()
         # ------------------------------------------------------------------
 

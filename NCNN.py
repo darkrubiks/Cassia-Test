@@ -53,13 +53,19 @@ class NCNN(nn.Module):
         )
 
         # --- Classifier head ---
+        """
         self.classifier = nn.Sequential(
             nn.Linear(5 * 5 * 64, 512),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(512, num_classes)
         )
-
+        """
+        self.classifier = nn.Sequential(
+            nn.Linear(5 * 5 * 64, 512, bias=False),
+            nn.BatchNorm1d(512)
+        )
+        
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # run each branch

@@ -31,6 +31,19 @@ class ArcFace(torch.nn.Module):
         logits = logits * self.s   
         return logits
     
+class CosFace(torch.nn.Module):
+    def __init__(self, s=64.0, m=0.40):
+        super(CosFace, self).__init__()
+        self.s = s
+        self.m = m
+
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor):
+        index = torch.where(labels != -1)[0]
+        target_logit = logits[index, labels[index].view(-1)]
+        final_target_logit = target_logit - self.m
+        logits[index, labels[index].view(-1)] = final_target_logit
+        logits = logits * self.s
+        return logits
 
 class CosineClassifier(torch.nn.Module):
     """
@@ -39,8 +52,7 @@ class CosineClassifier(torch.nn.Module):
     """
     def __init__(self, embedding_dim: int, num_classes: int):
         super().__init__()
-        self.weight = torch.nn.Parameter(torch.empty(num_classes, embedding_dim))
-        torch.nn.init.xavier_uniform_(self.weight)
+        self.weight = torch.nn.Parameter(torch.normal(0, 0.01, (num_classes, embedding_dim)))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (B, embedding_dim)  -->  (B, num_classes)
